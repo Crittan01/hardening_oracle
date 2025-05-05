@@ -1,135 +1,216 @@
-# roles/hardening/tasks/configuraciones_servidor_oracle/cis_19.yml
 ---
-- name: CIS 19 - Verificación de procedimientos externos (Permisos en $ORACLE_HOME/lib)
+- name: CIS 19 - Verificación de procedimientos externos en archivos de configuración
   block:
-    # Paso 1: Verificar los permisos actuales de $ORACLE_HOME/lib
-    - name: (Check - CIS 19) - Verificar permisos actuales de $ORACLE_HOME/lib
+    # Paso 1: Definiciones iniciales
+    - name: (Check - CIS 19) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_19_config_files:
+          - "{{ hardening_oracle_home }}/network/admin/listener.ora"
+          - "{{ hardening_oracle_home }}/network/admin/tnsnames.ora"
+        cis_19_files_details: []
+        cis_19_non_compliant_files: []
+
+    # Paso 2: Verificar existencia de archivos
+    - name: (Check - CIS 19) - Verificar si archivos existen
       ansible.builtin.stat:
-        path: "{{ hardening_oracle_home }}/lib"
-      register: cis_19_lib_stat
+        path: "{{ config_file }}"
+      register: cis_19_file_stats
+      loop: "{{ cis_19_config_files }}"
+      loop_control:
+        loop_var: config_file
       become: true
       become_user: "{{ hardening_current_user }}"
 
-    # Paso 2: Verificar si el directorio existe
-    - name: (Check - CIS 19) - Determinar si el directorio lib existe
+    # Paso 3: Buscar EXTPROC en archivos que existen
+    - name: (Check - CIS 19) - Buscar EXTPROC en archivos
+      ansible.builtin.shell: |
+        set -o pipefail
+        grep -v '^\\s*#' {{ config_file.stat.path }} | grep -i EXTPROC || true
+      register: cis_19_grep_results
+      loop: "{{ cis_19_file_stats.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | list }}"
+      loop_control:
+        loop_var: config_file
+      changed_when: false
+      failed_when: false
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      when: cis_19_file_stats.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | list | length > 0
+
+    # Paso 4: Procesar resultados
+    - name: (Check - CIS 19) - Analizar resultados
       ansible.builtin.set_fact:
-        cis_19_lib_exists: "{{ cis_19_lib_stat.stat.exists | default(false) }}"
-      when: cis_19_lib_stat.stat is defined
+        cis_19_files_details: "{{ cis_19_files_details + [file_detail] }}"
+        cis_19_non_compliant_files: "{{ cis_19_non_compliant_files + [file_path] if grep_result.stdout_lines | length > 0 else cis_19_non_compliant_files }}"
+      vars:
+        file_stat: "{{ cis_19_file_stats.results[idx] }}"
+        grep_result:
+          "{{ cis_19_grep_results.results[idx] if cis_19_grep_results.results is defined
+          and cis_19_grep_results.results | length > idx else {'stdout_lines': []} }}"
+        file_path: "{{ file_stat.stat.path if file_stat.stat.exists | default(false) else file_stat.item }}"
+        file_exists: "{{ file_stat.stat.exists | default(false) }}"
+        extproc_lines: "{{ grep_result.stdout_lines | default([]) }}"
+        file_detail:
+          {
+            "path": "{{ file_path }}",
+            "filename": "{{ file_path | basename }}",
+            "exists": "{{ file_exists }}",
+            "extproc_lines": "{{ extproc_lines }}",
+            "is_compliant": "{{ not file_exists or extproc_lines | length == 0 }}",
+          }
+      loop: "{{ range(0, cis_19_file_stats.results | length) | list }}"
+      loop_control:
+        loop_var: idx
 
-    # Paso 3: Si el directorio no existe, establecer las variables por defecto
-    - name: (Check - CIS 19) - Establecer variables por defecto si no existe
+    # Paso 5: Determinar estado general
+    - name: (Check - CIS 19) - Establecer estado general
       ansible.builtin.set_fact:
-        cis_19_lib_exists: false
-        cis_19_lib_mode: "N/A"
-        cis_19_lib_owner: "N/A"
-        cis_19_lib_group: "N/A"
-        cis_19_compliant_initial: false
-      when: not cis_19_lib_exists | default(false)
+        cis_19_compliant_initial: "{{ cis_19_non_compliant_files | length == 0 }}"
+        cis_19_remediated_files: []
 
-    # Paso 4: Si el directorio existe, obtener sus permisos y propietario
-    - name: (Check - CIS 19) - Obtener permisos y propietario si existe
-      ansible.builtin.set_fact:
-        cis_19_lib_mode: "{{ cis_19_lib_stat.stat.mode }}"
-        cis_19_lib_owner: "{{ cis_19_lib_stat.stat.pw_name }}"
-        cis_19_lib_group: "{{ cis_19_lib_stat.stat.gr_name }}"
-        cis_19_lib_perms_octal: "{{ cis_19_lib_stat.stat.mode[-3:] }}"
-      when: cis_19_lib_exists | default(false)
-
-    # Paso 5: Verificar si los permisos son conformes (750 o más restrictivos)
-    - name: (Check - CIS 19) - Determinar cumplimiento inicial
-      ansible.builtin.set_fact:
-        # Permisos 750 o más restrictivos (menor que 750 numéricamente)
-        cis_19_compliant_initial: "{{ cis_19_lib_perms_octal | default('777') <= '750' }}"
-      when: cis_19_lib_exists | default(false)
-
-    # Paso 6: Mostrar información para depuración
-    - name: (Check - CIS 19) - Mostrar información detectada
-      ansible.builtin.debug:
-        msg:
-          - "Directorio $ORACLE_HOME/lib existe: {{ cis_19_lib_exists }}"
-          - "Permisos actuales: {{ cis_19_lib_mode | default('N/A') }}"
-          - "Permisos en octal: {{ cis_19_lib_perms_octal | default('N/A') }}"
-          - "Propietario: {{ cis_19_lib_owner | default('N/A') }}"
-          - "Grupo: {{ cis_19_lib_group | default('N/A') }}"
-          - "Estado de cumplimiento: {{ cis_19_compliant_initial }}"
-        verbosity: 0
-
-    # Paso 7: Determinar si se requiere remediación
-    - name: (Check - CIS 19) - Determinar si se requiere remediación
-      ansible.builtin.set_fact:
-        cis_19_needs_remediation: "{{ cis_19_lib_exists | default(false) and not cis_19_compliant_initial }}"
-
-    # Paso 8: Bloque de remediación - Aplicar permisos 750 si se requiere
-    - name: (Remediation - CIS 19) - Aplicar permisos correctos a $ORACLE_HOME/lib
-      when: cis_19_needs_remediation | bool
+    # Paso 6: Remediación - Comentar líneas con EXTPROC
+    - name: (Remediation - CIS 19) - Comentar líneas con EXTPROC
+      when: not cis_19_compliant_initial
       block:
-        # Paso 8.1: Cambiar permisos de la carpeta
-        - name: (Remediation - CIS 19) - Cambiar permisos a 750 para $ORACLE_HOME/lib
-          ansible.builtin.file:
-            path: "{{ hardening_oracle_home }}/lib"
-            mode: "0750"
-            state: directory
-            recurse: true
-          become: true
-          become_user: root
-          register: cis_19_remediation_result
-
-        # Paso 8.2: Verificar permisos después de la remediación
-        - name: (Remediation - CIS 19) - Verificar permisos después de remediación
-          ansible.builtin.stat:
-            path: "{{ hardening_oracle_home }}/lib"
-          register: cis_19_lib_stat_after
+        # Hacer backup de los archivos
+        - name: (Remediation - CIS 19) - Hacer backup de archivos
+          ansible.builtin.copy:
+            src: "{{ remediation_file }}"
+            dest: "{{ remediation_file }}.{{ ansible_date_time.date }}"
+            remote_src: true
+            mode: preserve
+          loop: "{{ cis_19_non_compliant_files }}"
+          loop_control:
+            loop_var: remediation_file
           become: true
           become_user: "{{ hardening_current_user }}"
 
-        # Paso 8.3: Establecer variables de resultado final
-        - name: (Remediation - CIS 19) - Establecer variables de resultado final
+        # Comentar líneas con EXTPROC que no estén ya comentadas
+        - name: (Remediation - CIS 19) - Comentar líneas con EXTPROC no comentadas
+          ansible.builtin.shell: |
+            sed -i -E 's/^([[:space:]]*)([^#][^#]*EXTPROC.*)$/\1#\2/g' {{ remediation_file }}
+          loop: "{{ cis_19_non_compliant_files }}"
+          loop_control:
+            loop_var: remediation_file
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_19_remediation_result
+
+        # Registrar archivos remediados
+        - name: (Remediation - CIS 19) - Registrar archivos remediados
           ansible.builtin.set_fact:
-            cis_19_lib_mode_after: "{{ cis_19_lib_stat_after.stat.mode }}"
-            cis_19_lib_perms_octal_after: "{{ cis_19_lib_stat_after.stat.mode[-3:] }}"
-            cis_19_compliant_final: "{{ cis_19_lib_stat_after.stat.mode[-3:] <= '750' }}"
-            cis_19_was_remediated: true
+            cis_19_remediated_files: "{{ cis_19_remediated_files + [remediation_file] }}"
+          loop: "{{ cis_19_non_compliant_files }}"
+          loop_control:
+            loop_var: remediation_file
+          when: cis_19_remediation_result is success
 
-    # Paso 9: Establecer variables finales cuando no se requiere remediación
-    - name: (No Remediation Needed - CIS 19) - Establecer estado cuando no hay remediación
+        # Verificar si la remediación fue exitosa
+        - name: (Remediation - CIS 19) - Verificar remediación
+          ansible.builtin.shell: |
+            set -o pipefail
+            grep -v '^\\s*#' {{ verify_file }} | grep -i EXTPROC || true
+          register: cis_19_verify_results
+          loop: "{{ cis_19_non_compliant_files }}"
+          loop_control:
+            loop_var: verify_file
+          changed_when: false
+          failed_when: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+
+        # CORRECCIÓN: Identificar archivos donde aún hay EXTPROC no comentado
+        - name: (Remediation - CIS 19) - Identificar archivos con EXTPROC persistente
+          ansible.builtin.set_fact:
+            cis_19_still_non_compliant: "{{ cis_19_still_non_compliant | default([]) }}"
+
+        - name: (Remediation - CIS 19) - Procesar resultados de verificación
+          ansible.builtin.set_fact:
+            cis_19_still_non_compliant:
+              "{{ cis_19_still_non_compliant + [cis_19_non_compliant_files[idx]]
+              if result.stdout_lines | length > 0
+              else cis_19_still_non_compliant }}"
+          loop: "{{ cis_19_verify_results.results | default([]) }}"
+          loop_control:
+            loop_var: result
+            index_var: idx
+          when: cis_19_verify_results.results is defined and cis_19_verify_results.results | length > 0
+
+        # Actualizar los detalles de los archivos después de la remediación
+        - name: (Remediation - CIS 19) - Actualizar detalles de archivos
+          ansible.builtin.set_fact:
+            cis_19_files_details_updated: []
+
+        - name: (Remediation - CIS 19) - Procesar cada archivo
+          ansible.builtin.set_fact:
+            cis_19_files_details_updated: >-
+              {{ cis_19_files_details_updated + [
+                file_detail | combine({
+                  'extproc_lines': [],
+                  'is_compliant': true,
+                  'was_remediated': true
+                }) if file_detail.path in cis_19_remediated_files and file_detail.path not in (cis_19_still_non_compliant | default([]))
+                else file_detail
+              ] }}
+          loop: "{{ cis_19_files_details }}"
+          loop_control:
+            loop_var: file_detail
+
+    # Paso 7: Establecer estado final
+    - name: (Check/Remediation - CIS 19) - Establecer estado final
       ansible.builtin.set_fact:
-        cis_19_lib_mode_after: "{{ cis_19_lib_mode | default('N/A') }}"
-        cis_19_lib_perms_octal_after: "{{ cis_19_lib_perms_octal | default('N/A') }}"
-        cis_19_compliant_final: "{{ cis_19_compliant_initial }}"
-        cis_19_was_remediated: false
-      when: not cis_19_needs_remediation | bool
+        cis_19_files_details: "{{ cis_19_files_details_updated | default(cis_19_files_details) }}"
+        cis_19_non_compliant_files: "{{ cis_19_still_non_compliant | default([]) }}"
+        cis_19_compliant_final: "{{ (cis_19_still_non_compliant | default([])) | length == 0 }}"
+        cis_19_was_remediated: "{{ cis_19_remediated_files | default([]) | length > 0 }}"
+      when: not cis_19_compliant_initial
 
-    # Paso 10: Agregar los resultados a la lista global
-    - name: Agregar resultados de CIS 19 a la lista global
+    # Establecer estado final cuando ya es conforme
+    - name: (No Remediation Needed - CIS 19) - Establecer estado final cuando ya es conforme
+      ansible.builtin.set_fact:
+        cis_19_compliant_final: true
+        cis_19_was_remediated: false
+      when: cis_19_compliant_initial
+
+    # Paso 8: Mostrar resultados
+    - name: (Check - CIS 19) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Archivos analizados: {{ cis_19_config_files | length }}"
+          - "Archivos existentes: {{ cis_19_files_details | selectattr('exists', 'equalto', true) | list | length }}"
+          - "Archivos no conformes iniciales: {{ (not cis_19_compliant_initial) | ternary(cis_19_remediated_files | length, 0) }}"
+          - "Archivos no conformes finales: {{ cis_19_non_compliant_files | length }}"
+          - "Estado de cumplimiento inicial: {{ cis_19_compliant_initial }}"
+          - "Estado de cumplimiento final: {{ cis_19_compliant_final }}"
+          - "Remediación aplicada: {{ cis_19_was_remediated }}"
+
+    # Paso 9: Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
       ansible.builtin.set_fact:
         instances_results: "{{ instances_results | default([]) + [instance_result_cis_19] }}"
       vars:
         instance_result_cis_19:
           instance_name: "{{ hardening_current_instance }}"
           cis_19:
-            parametro: "listener.ora, tnsnames.ora - procedimientos externos"
-            description: >-
-              Remover las entradas para los procedimientos externos de los archivos listener.ora y tnsnames.ora.
-              Los procedimientos externos pueden llamar librerías compartidas en el sistema, que se encuentren
-              en la ruta $ORACLE_HOME/lib o $ORACLE_HOME/bin
-            implementacion: >-
-              Remover las librerías externas compartidas de $ORACLE_HOME/lib o establecer permisos restrictivos.
+            parametro: "Procedimientos externos en archivos de configuración"
+            description: "Deshabilitar los procedimientos externos (EXTPROC) en listener.ora y tnsnames.ora"
+            implementacion: |
+              Los procedimientos externos deben ser deshabilitados comentando todas las líneas
+              que contengan "EXTPROC" en los archivos listener.ora y tnsnames.ora.
             verificacion: >-
-              Verificar la configuración establecida mediante la inspección de permisos.
+              Verificar que no existan líneas sin comentar que contengan "EXTPROC".
+            objetivo: >-
+              Reducir la superficie de ataque deshabilitando la capacidad de ejecutar
+              procedimientos externos desde la base de datos.
             commando: |
-              ls -l $ORACLE_HOME/lib
+              grep -v '^#' $ORACLE_HOME/network/admin/listener.ora | grep -i EXTPROC
+              grep -v '^#' $ORACLE_HOME/network/admin/tnsnames.ora | grep -i EXTPROC
             remediacion: |
-              chmod -R 750 $ORACLE_HOME/lib
-            nota: >-
-              Verificar la configuración establecida: Remediacion por s.o chmod -R 750 $ORACLE_HOME/lib.
-            type: "filesystem"
-            lib_exists: "{{ cis_19_lib_exists }}"
-            lib_mode_before: "{{ cis_19_lib_mode | default('N/A') }}"
-            lib_mode_after: "{{ cis_19_lib_mode_after | default('N/A') }}"
-            lib_perms_octal_before: "{{ cis_19_lib_perms_octal | default('N/A') }}"
-            lib_perms_octal_after: "{{ cis_19_lib_perms_octal_after | default('N/A') }}"
-            lib_owner: "{{ cis_19_lib_owner | default('N/A') }}"
-            lib_group: "{{ cis_19_lib_group | default('N/A') }}"
+              # Comentar todas las líneas con EXTPROC
+              # Antes: (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
+              # Después: #(ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
+            type: "configuration"
+            files_details: "{{ cis_19_files_details }}"
+            non_compliant_files: "{{ cis_19_non_compliant_files }}"
             compliant_initial: "{{ cis_19_compliant_initial }}"
             compliant_final: "{{ cis_19_compliant_final }}"
             was_remediated: "{{ cis_19_was_remediated }}"

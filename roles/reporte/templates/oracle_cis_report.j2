@@ -2235,8 +2235,11 @@
                     </div>
                     {% endif %}
 
-                    <!-- CIS 19 - Listener.ora, tnsnames.ora (Procedimientos externos) -->
+                    <!-- CIS 19 - Procedimientos externos en archivos de configuración -->
                     {% if instance_data.cis_19 is defined %}
+                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
+                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
+
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -2253,39 +2256,59 @@
                                 {{ instance_data.cis_19.implementacion }}
                             </p>
                             
+                            <p><strong>Objetivo:</strong> {{ instance_data.cis_19.objetivo }}</p>
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            <h4>Estado de archivos de configuración</h4>
                             <table>
                                 <tr>
-                                    <th>Directorio</th>
-                                    <th>¿Existe?</th>
-                                    <th>Permisos</th>
-                                    <th>Permisos (octal)</th>
-                                    <th>Propietario</th>
-                                    <th>Grupo</th>
+                                    <th>Archivo</th>
+                                    <th>Existe</th>
                                     <th>Estado</th>
+                                    <th>Problemas</th>
                                 </tr>
-                                <tr class="{{ 'pass' if instance_data.cis_19.compliant_initial else 'fail' }}">
-                                    <td>$ORACLE_HOME/lib</td>
-                                    <td>{{ instance_data.cis_19.lib_exists }}</td>
-                                    <td>{{ instance_data.cis_19.lib_mode_before }}</td>
-                                    <td>{{ instance_data.cis_19.lib_perms_octal_before }}</td>
-                                    <td>{{ instance_data.cis_19.lib_owner }}</td>
-                                    <td>{{ instance_data.cis_19.lib_group }}</td>
-                                    <td>{{ 'Conforme' if instance_data.cis_19.compliant_initial else 'No Conforme' }}</td>
+                                {% for file in instance_data.cis_19.files_details %}
+                                <tr class="{{ 'pass' if file.is_compliant else 'fail' }}">
+                                    <td>{{ file.filename }}</td>
+                                    <td>{{ 'Sí' if file.exists else 'No' }}</td>
+                                    <td>{{ 'Conforme' if file.is_compliant else 'No Conforme' }}</td>
+                                    <td>
+                                        {% if not file.is_compliant %}
+                                        <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c; margin: 0;">
+                                            <p><strong>Líneas con EXTPROC no comentadas:</strong></p>
+                                            <pre style="margin: 5px 0; white-space: pre-wrap; word-break: break-word;">{% for line in file.extproc_lines %}{{ line }}
+                    {% endfor %}</pre>
+                                        </div>
+                                        {% else %}
+                                            {% if not file.exists %}
+                                                <span class="status-indicator status-info">Archivo no encontrado</span>
+                                            {% else %}
+                                                <span class="status-indicator status-success">No se encontraron líneas EXTPROC</span>
+                                            {% endif %}
+                                        {% endif %}
+                                    </td>
                                 </tr>
+                                {% endfor %}
                             </table>
                             
-                            <div class="info-box">
-                                <p><strong>Descripcion:</strong> {{ instance_data.cis_19.verificacion }}</p>
-                                <p><strong>Comando:</strong> {{ instance_data.cis_19.commando }}</p>
-                                <p><strong>Nota:</strong> {{ instance_data.cis_19.nota }}</p>
-                            </div>
-                            
-                            {% if not instance_data.cis_19.compliant_initial %}
-                            <div class="remediation">
-                            # Remediación para permisos en $ORACLE_HOME/lib
-                            {{ instance_data.cis_19.remediacion }}
+                            {% if not instance_data.cis_19.compliant_initial and instance_data.cis_19.non_compliant_files|length > 0 %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Acción recomendada:</strong></p>
+                                <p>Comentar las líneas que contienen EXTPROC en los archivos de configuración:</p>
+                                <pre>
+                    # Para cada archivo (listener.ora y tnsnames.ora):
+                    # Buscar líneas que contengan EXTPROC y comentarlas añadiendo # al inicio
+                    # Ejemplo:
+                    # Original: (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
+                    # Remediado: #(ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
+                                </pre>
                             </div>
                             {% endif %}
+                            
+                            <div class="info-box">
+                                <p><strong>Verificación:</strong> {{ instance_data.cis_19.verificacion }}</p>
+                                <p><strong>Comando:</strong> {{ instance_data.cis_19.commando }}</p>
+                            </div>
                         </div>
                     </div>
                     {% endif %}
@@ -6537,8 +6560,11 @@
                     </div>
                     {% endif %}
 
-                    <!-- CIS 19 - Listener.ora, tnsnames.ora (Procedimientos externos) -->
+                    <!-- CIS 19 - Procedimientos externos en archivos de configuración -->
                     {% if instance_data.cis_19 is defined %}
+                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
+                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
+
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -6550,36 +6576,41 @@
                             </span>
                         </div>
                         <div class="control-body">
-                            <p class="control-description">
-                                <span class="requirement">Requerimiento: {{ instance_data.cis_19.description }}</span>
-                                {{ instance_data.cis_19.implementacion }}
-                            </p>
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
                             
+                            <h4>Estado de archivos de configuración</h4>
                             <table>
                                 <tr>
-                                    <th>Directorio</th>
-                                    <th>¿Existe?</th>
-                                    <th>Permisos Antes</th>
-                                    <th>Permisos Después</th>
-                                    <th>Permisos Esperados</th>
+                                    <th>Archivo</th>
+                                    <th>Existe</th>
                                     <th>Estado</th>
+                                    <th>Remediación</th>
                                 </tr>
-                                <tr class="{{ 'pass' if instance_data.cis_19.compliant_final else 'fail' }}">
-                                    <td>$ORACLE_HOME/lib</td>
-                                    <td>{{ instance_data.cis_19.lib_exists }}</td>
-                                    <td>{{ instance_data.cis_19.lib_perms_octal_before }}</td>
-                                    <td>{{ instance_data.cis_19.lib_perms_octal_after }}</td>
-                                    <td>750 o más restrictivo</td>
+                                {% for file in instance_data.cis_19.files_details %}
+                                <tr class="{{ 'pass' if file.is_compliant else 'fail' }}">
+                                    <td>{{ file.filename }}</td>
+                                    <td>{{ 'Sí' if file.exists else 'No' }}</td>
+                                    <td>{{ 'Conforme' if file.is_compliant else 'No Conforme' }}</td>
                                     <td>
-                                        {{ 'Conforme' if instance_data.cis_19.compliant_final else 'No Conforme' }}
-                                        {% if instance_data.cis_19.was_remediated %} (Remediado){% endif %}
+                                        {% if file.was_remediated is defined and file.was_remediated %}
+                                            <span class="status-indicator status-success">✓ Remediado (líneas EXTPROC comentadas)</span>
+                                        {% elif file.is_compliant %}
+                                            {% if not file.exists %}
+                                                <span class="status-indicator status-info">No aplica (archivo no existe)</span>
+                                            {% else %}
+                                                <span class="status-indicator status-neutral">Ya conforme</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="status-indicator status-danger">No se pudo remediar</span>
+                                        {% endif %}
                                     </td>
                                 </tr>
+                                {% endfor %}
                             </table>
                             
-                            {% if instance_data.cis_19.was_remediated %}
-                            <div class="info-box">
-                                <p><strong>Acción realizada:</strong> Se aplicaron permisos 750 al directorio $ORACLE_HOME/lib para restringir el acceso a procedimientos externos.</p>
+                            {% if not instance_data.cis_19.compliant_final %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Atención:</strong> Aún existen líneas EXTPROC no comentadas en algunos archivos. Este control puede requerir remediación manual.</p>
                             </div>
                             {% endif %}
                         </div>
@@ -10021,36 +10052,39 @@
                         </tr>
                         {% endif %}
 
-                        <!-- CIS 19 - Listener.ora, tnsnames.ora (Procedimientos externos) -->
+                        <!-- CIS 19 - Procedimientos externos en archivos de configuración -->
                         {% if instance_data.cis_19 is defined %}
+                        {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
+
                         <tr>
                             <td>
                                 <span class="control-id">CIS 19</span>
                                 {{ instance_data.cis_19.parametro }}
+                                <br><small>Usuario: {{ instance_user }}</small>
                             </td>
                             <td class="{{ 'pass' if instance_data.cis_19.compliant_initial else 'fail' }}">
-                                {% if not instance_data.cis_19.lib_exists %}
-                                    Directorio no existe
+                                {% if instance_data.cis_19.compliant_initial %}
+                                    Conforme
                                 {% else %}
-                                    Permisos: {{ instance_data.cis_19.lib_perms_octal_before }}
-                                    ({{ 'Conforme' if instance_data.cis_19.compliant_initial else 'No Conforme' }})
+                                    No Conforme ({{ instance_data.cis_19.non_compliant_files | length }} archivos con EXTPROC)
                                 {% endif %}
                             </td>
                             <td class="{{ 'pass' if instance_data.cis_19.compliant_final else 'fail' }}">
-                                {% if not instance_data.cis_19.lib_exists %}
-                                    Directorio no existe
+                                {% if instance_data.cis_19.compliant_final %}
+                                    Conforme
                                 {% else %}
-                                    Permisos: {{ instance_data.cis_19.lib_perms_octal_after }}
-                                    ({{ 'Conforme' if instance_data.cis_19.compliant_final else 'No Conforme' }})
+                                    No Conforme ({{ instance_data.cis_19.non_compliant_files | length }} archivos con EXTPROC)
                                 {% endif %}
                             </td>
                             <td>
-                                {% if instance_data.cis_19.was_remediated %}
+                                {% if instance_data.cis_19.was_remediated and instance_data.cis_19.compliant_final %}
                                     <span class="change-indicator positive">✓ Remediado</span>
+                                {% elif instance_data.cis_19.was_remediated and not instance_data.cis_19.compliant_final %}
+                                    <span class="change-indicator warning">Remedición parcial</span>
                                 {% elif instance_data.cis_19.compliant_initial and instance_data.cis_19.compliant_final %}
                                     <span class="change-indicator neutral">Ya conforme</span>
                                 {% elif not instance_data.cis_19.compliant_initial and not instance_data.cis_19.compliant_final %}
-                                    <span class="change-indicator neutral">Sin cambio</span>
+                                    <span class="change-indicator manual">Requiere revisión manual</span>
                                 {% else %}
                                     <span class="change-indicator negative">Degradado</span>
                                 {% endif %}
