@@ -858,3 +858,14 @@
   tags:
     - autorizacion
     - cis_73
+
+- name: Incluir CIS 74 - trace_directory
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_74.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_74
+  tags:
+    - autorizacion
+    - cis_74

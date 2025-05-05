@@ -1157,6 +1157,33 @@
                         {% endif %}
                     {% endif %}
 
+                    {% if instance_data.cis_72 is defined %}
+                        {% if instance_data.cis_72.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_72.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
+                    {% if instance_data.cis_73 is defined %}
+                        {% if instance_data.cis_73.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_73.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
+                    {% if instance_data.cis_74 is defined %}
+                        {% if instance_data.cis_74.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_74.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
                     {% set initial_percent = (initial_compliant / total_checks * 100) | round | int %}
                     {% set final_percent = (final_compliant / total_checks * 100) | round | int %}
                     
@@ -5637,7 +5664,7 @@
                     </div>
                     {% endif %}
 
-                    <!-- CIS 72 - trace_directory_server en sqlnet.ora -->
+                    <!-- CIS 72 - Directorio Oracle network/trace -->
                     {% if instance_data.cis_72 is defined %}
                     <div class="control-box">
                         <div class="control-header">
@@ -5657,17 +5684,7 @@
                             
                             <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
                             
-                            <div class="info-box" style="background-color: rgba(52, 152, 219, 0.1); border-left-color: #3498db;">
-                                <p>
-                                    {% if instance_data.cis_72.trace_dir_configured %}
-                                    <strong>Parametro configurado:</strong> El directorio de trace está configurado en sqlnet.ora como: <code>{{ instance_data.cis_72.trace_dir }}</code>
-                                    {% else %}
-                                    <strong>Valor predeterminado:</strong> No se encontró configuración explícita en sqlnet.ora. Se utiliza el directorio predeterminado: <code>{{ instance_data.cis_72.trace_dir }}</code>
-                                    {% endif %}
-                                </p>
-                            </div>
-                            
-                            <h4>Estado del directorio de trace</h4>
+                            <h4>Estado del directorio trace</h4>
                             <table>
                                 <tr>
                                     <th>Directorio</th>
@@ -5725,11 +5742,6 @@
 
                     # Establecer permisos
                     chmod 0750 {{ instance_data.cis_72.trace_dir }}
-
-                    {% if not instance_data.cis_72.trace_dir_configured and not instance_data.cis_72.using_default %}
-                    # Configurar en sqlnet.ora (opcional)
-                    echo "trace_directory_server={{ instance_data.cis_72.trace_dir }}" >> {{ instance_home }}/network/admin/sqlnet.ora
-                    {% endif %}
                                 </pre>
                             </div>
                             {% endif %}
@@ -5838,6 +5850,60 @@
                                 <p><strong>Verificación:</strong> {{ instance_data.cis_73.verificacion }}</p>
                                 <p><strong>Nota:</strong> {{ instance_data.cis_73.nota }}</p>
                             </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- CIS 74 - trace_directory -->
+                    {% if instance_data.cis_74 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 74</span>
+                                {{ instance_data.cis_74.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_74.compliant_initial else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_74.compliant_initial else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_74.description }}</span>
+                                {{ instance_data.cis_74.implementacion }}
+                            </p>
+                            
+                            <table>
+                                <tr>
+                                    <th>Archivo</th>
+                                    <th>Parámetro</th>
+                                    <th>¿Existe?</th>
+                                    <th>Valor Actual</th>
+                                    <th>Valor Esperado</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_74.compliant_initial else 'fail' }}">
+                                    <td>listener.ora</td>
+                                    <td>trace_directory</td>
+                                    <td>{{ instance_data.cis_74.param_exists }}</td>
+                                    <td>{{ instance_data.cis_74.param_value }}</td>
+                                    <td>{{ instance_data.cis_74.expected_value }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_74.compliant_initial else 'No Conforme' }}</td>
+                                </tr>
+                            </table>
+                            
+                            <div class="info-box">
+                                <p><strong>Descripcion:</strong> {{ instance_data.cis_74.verificacion }}</p>
+                                <p><strong>Comando:</strong> {{ instance_data.cis_74.commando }}</p>
+                                <p><strong>Nota:</strong> {{ instance_data.cis_74.nota }}</p>
+                            </div>
+                            
+                            {% if not instance_data.cis_74.compliant_initial %}
+                            <div class="remediation">
+                            # Remediación para trace_directory
+                            # Agregar o modificar en $ORACLE_HOME/network/admin/listener.ora:
+                            trace_directory=$ORACLE_HOME/network/trace
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     {% endif %}
@@ -9723,6 +9789,7 @@
                         </div>
                     </div>
                     {% endif %}
+
                     <!-- CIS 73 - Permisos en archivo listener.ora -->
                     {% if instance_data.cis_73 is defined %}
                     <div class="control-box">
@@ -9774,6 +9841,58 @@
                                 <p><strong>Atención:</strong> Este control requiere remediación manual. El archivo listener.ora debe tener permisos 750 o más restrictivos y pertenecer al usuario de la instancia y a un grupo válido (dba, oinstall, asmdba).</p>
                             </div>
                             {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- CIS 74 - trace_directory -->
+                    {% if instance_data.cis_74 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 74</span>
+                                {{ instance_data.cis_74.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_74.compliant_final else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_74.compliant_final else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_74.description }}</span>
+                                {{ instance_data.cis_74.implementacion }}
+                            </p>
+                            
+                            <table>
+                                <tr>
+                                    <th>Archivo</th>
+                                    <th>Parámetro</th>
+                                    <th>Valor Antes</th>
+                                    <th>Valor Después</th>
+                                    <th>Valor Esperado</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_74.compliant_final else 'fail' }}">
+                                    <td>listener.ora</td>
+                                    <td>trace_directory</td>
+                                    <td>{{ instance_data.cis_74.param_value }}</td>
+                                    <td>
+                                        {% if instance_data.cis_74.was_remediated %}
+                                            {{ instance_data.cis_74.remediated_value }}
+                                        {% else %}
+                                            {{ instance_data.cis_74.param_value }}
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ instance_data.cis_74.expected_value }}</td>
+                                    <td>
+                                        {{ 'Conforme' if instance_data.cis_74.compliant_final else 'No Conforme' }}
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <div class="info-box">
+                                <p><strong>Nota:</strong> {{ instance_data.cis_74.nota }}</p>
+                            </div>
                         </div>
                     </div>
                     {% endif %}
@@ -12386,6 +12505,43 @@
                                     <span class="change-indicator neutral">Ya conforme</span>
                                 {% elif not instance_data.cis_73.compliant_initial and not instance_data.cis_73.compliant_final %}
                                     <span class="change-indicator manual">Requiere revisión manual</span>
+                                {% else %}
+                                    <span class="change-indicator negative">Degradado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+
+                        <!-- CIS 74 - trace_directory -->
+                        {% if instance_data.cis_74 is defined %}
+                        <tr>
+                            <td>
+                                <span class="control-id">CIS 74</span>
+                                {{ instance_data.cis_74.parametro }}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_74.compliant_initial else 'fail' }}">
+                                {% if instance_data.cis_74.param_exists %}
+                                    trace_directory={{ instance_data.cis_74.param_value }}
+                                {% else %}
+                                    No configurado
+                                {% endif %}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_74.compliant_final else 'fail' }}">
+                                {% if instance_data.cis_74.was_remediated %}
+                                    trace_directory={{ instance_data.cis_74.expected_value }}
+                                {% elif instance_data.cis_74.param_exists %}
+                                    trace_directory={{ instance_data.cis_74.param_value }}
+                                {% else %}
+                                    No configurado
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if instance_data.cis_74.was_remediated %}
+                                    <span class="change-indicator positive">✓ Remediado</span>
+                                {% elif instance_data.cis_74.compliant_initial and instance_data.cis_74.compliant_final %}
+                                    <span class="change-indicator neutral">Ya conforme</span>
+                                {% elif not instance_data.cis_74.compliant_initial and not instance_data.cis_74.compliant_final %}
+                                    <span class="change-indicator neutral">Sin cambio (Remediación manual requerida)</span>
                                 {% else %}
                                     <span class="change-indicator negative">Degradado</span>
                                 {% endif %}
