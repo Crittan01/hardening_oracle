@@ -1,0 +1,114 @@
+---
+- name: CIS 73 - Verificación de permisos en archivo listener.ora
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 73) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_73_target_file: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+        cis_73_valid_pattern: "^ora[a-zA-Z0-9]{3,4}$"
+        cis_73_invalid_users: ["oracle"]
+        cis_73_explict_valid_users: ["grid"] # Usuarios explícitamente válidos
+        cis_73_valid_groups: ["dba", "oinstall", "asmdba"]
+        cis_73_instance_user_valid: "{{
+          hardening_current_user is match('^ora[a-zA-Z0-9]{3,4}$') and
+          hardening_current_user != 'oracle' or
+          hardening_current_user in ['grid'] }}"
+        cis_73_file_details: []
+
+    # Verificar archivo
+    - name: (Check - CIS 73) - Verificar archivo listener.ora
+      ansible.builtin.stat:
+        path: "{{ cis_73_target_file }}"
+        get_attributes: true
+      register: cis_73_file_stat
+      become: true
+
+    # Procesar resultados
+    - name: (Check - CIS 73) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_73_file_exists: "{{ cis_73_file_stat.stat.exists | default(false) }}"
+        cis_73_file_details: "{{ file_detail }}"
+        cis_73_compliant: "{{ file_compliant if cis_73_file_stat.stat.exists | default(false) else false }}"
+      vars:
+        # Definir criterios de validación
+        valid_owner: "{{ cis_73_file_stat.stat.exists and cis_73_file_stat.stat.pw_name == hardening_current_user }}"
+        valid_naming: "{{
+          cis_73_file_stat.stat.exists and
+          (cis_73_file_stat.stat.pw_name is match(cis_73_valid_pattern) and cis_73_file_stat.stat.pw_name not in cis_73_invalid_users) or
+          cis_73_file_stat.stat.pw_name in cis_73_explict_valid_users }}"
+        valid_group: "{{ cis_73_file_stat.stat.exists and cis_73_file_stat.stat.gr_name in cis_73_valid_groups }}"
+        valid_permission: "{{
+          cis_73_file_stat.stat.exists and
+          (cis_73_file_stat.stat.mode | regex_replace('^0', '') | int(base=8) <= 0o750) }}"
+        # Determinar cumplimiento general
+        file_compliant: "{{ cis_73_file_stat.stat.exists and valid_owner and valid_naming and valid_group and valid_permission }}"
+        # Crear objeto con detalles
+        file_detail:
+          {
+            "path": "{{ cis_73_target_file }}",
+            "exists": "{{ cis_73_file_stat.stat.exists | default(false) }}",
+            "owner": "{{ cis_73_file_stat.stat.pw_name if cis_73_file_stat.stat.exists else 'N/A' }}",
+            "group": "{{ cis_73_file_stat.stat.gr_name if cis_73_file_stat.stat.exists else 'N/A' }}",
+            "mode": "{{ cis_73_file_stat.stat.mode if cis_73_file_stat.stat.exists else 'N/A' }}",
+            "owner_valid": "{{ valid_owner if cis_73_file_stat.stat.exists else false }}",
+            "naming_valid": "{{ valid_naming if cis_73_file_stat.stat.exists else false }}",
+            "group_valid": "{{ valid_group if cis_73_file_stat.stat.exists else false }}",
+            "permission_valid": "{{ valid_permission if cis_73_file_stat.stat.exists else false }}",
+            "compliant": "{{ file_compliant if cis_73_file_stat.stat.exists else false }}",
+          }
+      when: cis_73_file_stat.stat is defined
+
+    # Establecer valores iniciales y finales
+    - name: (Check - CIS 73) - Establecer estado general
+      ansible.builtin.set_fact:
+        cis_73_compliant_initial: "{{ cis_73_compliant | default(false) }}"
+        cis_73_compliant_final: "{{ cis_73_compliant | default(false) }}"
+        cis_73_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 73) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Instancia: {{ hardening_current_instance }}"
+          - "Archivo: {{ cis_73_target_file }}"
+          - "Existe: {{ cis_73_file_exists }}"
+          - "Estado de cumplimiento: {{ cis_73_compliant_initial }}"
+          - "Detalles: {{ cis_73_file_details }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_73] }}"
+      vars:
+        instance_result_cis_73:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_73:
+            parametro: "listener.ora"
+            description: "Verifique y configure permisos según sea necesario. Es un parámetro para conectividad."
+            implementacion: |
+              El archivo listener.ora debe tener permisos 750 o más restrictivos. Este archivo
+              debe pertenecer al usuario que ejecuta la instancia (usuario que siga el patrón 'ora' + 3-4 caracteres
+              o usuario 'grid') y a un grupo válido (dba, oinstall, asmdba).
+            verificacion: >-
+              Verificar los permisos y propiedad del archivo listener.ora.
+            objetivo: >-
+              Asegurar que el archivo listener.ora tenga permisos de acceso apropiados. Este archivo
+              contiene la configuración para el listener Oracle que gestiona las conexiones a la base de datos.
+              Al restringir los permisos a 750, solo el propietario y su grupo tienen acceso,
+              protegiendo la configuración de accesos no autorizados.
+            commando: |
+              ls -la $ORACLE_HOME/network/admin/listener.ora
+            nota: "Los permisos 750 significan rwxr-x--- (propietario: rwx, grupo: r-x, otros: ---)"
+            type: "filesystem"
+            target_file: "{{ cis_73_target_file }}"
+            file_details: "{{ cis_73_file_details }}"
+            file_exists: "{{ cis_73_file_exists | default(false) }}"
+            instance_user: "{{ hardening_current_user }}"
+            instance_user_valid: "{{ cis_73_instance_user_valid }}"
+            valid_pattern: "{{ cis_73_valid_pattern }}"
+            explicit_valid_users: "{{ cis_73_explict_valid_users }}"
+            valid_groups: "{{ cis_73_valid_groups }}"
+            compliant_initial: "{{ cis_73_compliant_initial }}"
+            compliant_final: "{{ cis_73_compliant_final }}"
+            was_remediated: false

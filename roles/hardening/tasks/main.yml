@@ -836,3 +836,14 @@
   tags:
     - autorizacion
     - cis_71
+
+- name: Incluir CIS 73 - sqlnet.ora
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_73.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_73
+  tags:
+    - autorizacion
+    - cis_73
