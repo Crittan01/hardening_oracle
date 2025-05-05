@@ -49,11 +49,9 @@
         cis_72_dir_mode: "{{ cis_72_trace_dir_stat.stat.mode | default('N/A') if cis_72_trace_dir_stat.stat.exists | default(false) else 'N/A' }}"
         cis_72_owner_valid: "{{
           cis_72_trace_dir_stat.stat.exists | default(false) and
-          (
-          (cis_72_trace_dir_stat.stat.pw_name is match(cis_72_valid_pattern) and
+          ((cis_72_trace_dir_stat.stat.pw_name is match(cis_72_valid_pattern) and
           cis_72_trace_dir_stat.stat.pw_name not in cis_72_invalid_users) or
-          cis_72_trace_dir_stat.stat.pw_name in cis_72_explict_valid_users
-          ) }}"
+          cis_72_trace_dir_stat.stat.pw_name in cis_72_explict_valid_users) }}"
         cis_72_owner_matches_instance: "{{
           cis_72_trace_dir_stat.stat.exists | default(false) and
           cis_72_trace_dir_stat.stat.pw_name == hardening_current_user }}"
