@@ -126,8 +126,7 @@
           cis_74:
             parametro: "trace_directory"
             description: >-
-              Establece el tiempo en segundos, en el cual el cliente debe realizar la solicitud de conexión al listener,
-              después de que la conexión de red ha sido establecida.
+              Configuración del parámetro trace_directory, para trazas de sesiones de usuarios.
             implementacion: |
               En el archivo Listener.ora, configurar el siguiente parámetro:
               trace_directory=$ORACLE_HOME/network/trace
@@ -137,8 +136,7 @@
               cd $ORACLE_HOME/network/admin
               grep -i trace_directory listener.ora
             nota: >-
-              La configuración de este valor en un nivel muy bajo puede ocasionar que los usuarios no se conecten a la base de datos.
-              Se debe aplicar el valor recomendado e ir aumentándolo hasta que opere correctamente.
+              Defecto= ORACLE_HOME/network/trace.
             type: "network"
             file_exists: "{{ cis_74_file_exists }}"
             param_exists: "{{ cis_74_param_exists }}"
