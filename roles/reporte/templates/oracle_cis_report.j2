@@ -1148,6 +1148,15 @@
                         {% endif %}
                     {% endif %}
 
+                    {% if instance_data.cis_71 is defined %}
+                        {% if instance_data.cis_71.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_71.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
                     {% set initial_percent = (initial_compliant / total_checks * 100) | round | int %}
                     {% set final_percent = (final_compliant / total_checks * 100) | round | int %}
                     
@@ -4009,33 +4018,33 @@
                     </div>
                     {% endif %}
 
-<!-- CIS 48 - Privilegios de Sistema -->
-{% if instance_data.cis_48 is defined %}
-<div class="control-box">
-    <div class="control-header">
-        <h3 class="control-title">
-            <span class="control-id">CIS 48</span>
-            {{ instance_data.cis_48.parametro }}
-        </h3>
-        <span class="{{ 'status-indicator status-success' if instance_data.cis_48.compliant_initial else 'status-indicator status-danger' }}">
-            {{ 'Conforme' if instance_data.cis_48.compliant_initial else 'No Conforme' }}
-        </span>
-    </div>
-    <div class="control-body">
-        <p class="control-description">
-            <span class="requirement">Requerimiento: {{ instance_data.cis_48.description }}</span>
-            {{ instance_data.cis_48.implementacion }}
-        </p>
-        
-        <table>
-            <tr>
-                <th>Privilegios de sistema no autorizados</th>
-                <th>Estado</th>
-            </tr>
-            <tr class="{{ 'pass' if instance_data.cis_48.compliant_initial else 'fail' }}">
-                <td>{{ instance_data.cis_48.privileges_count }}</td>
-                <td>{{ 'Conforme' if instance_data.cis_48.compliant_initial else 'No Conforme' }}</td>
-            </tr>
+                    <!-- CIS 48 - Privilegios de Sistema -->
+                    {% if instance_data.cis_48 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 48</span>
+                                {{ instance_data.cis_48.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_48.compliant_initial else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_48.compliant_initial else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_48.description }}</span>
+                                {{ instance_data.cis_48.implementacion }}
+                            </p>
+                            
+                            <table>
+                                <tr>
+                                    <th>Privilegios de sistema no autorizados</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_48.compliant_initial else 'fail' }}">
+                                    <td>{{ instance_data.cis_48.privileges_count }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_48.compliant_initial else 'No Conforme' }}</td>
+                                </tr>
                             </table>
                             
                             {% if instance_data.cis_48.unauthorized_privileges %}
@@ -4878,9 +4887,6 @@
 
                     <!-- CIS 62 - Permisos en archivos .ora -->
                     {% if instance_data.cis_62 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -4972,8 +4978,6 @@
 
                     <!-- CIS 65 - ifile -->
                     {% if instance_data.cis_65 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -5074,9 +5078,6 @@
 
                     <!-- CIS 66 - init.ora audit_file_dest -->
                     {% if instance_data.cis_66 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -5172,9 +5173,6 @@
 
                     <!-- CIS 67 - init.ora user_dump_dest -->
                     {% if instance_data.cis_67 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -5270,9 +5268,6 @@
 
                     <!-- CIS 68 - init.ora control_files -->
                     {% if instance_data.cis_68 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -5368,9 +5363,6 @@
 
                     <!-- CIS 69 - init.ora log_archive_dest_n -->
                     {% if instance_data.cis_69 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -5469,9 +5461,6 @@
 
                     <!-- CIS 70 - Archivos de configuración de red Oracle -->
                     {% if instance_data.cis_70 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -5545,6 +5534,105 @@
                                 </pre>
                             </div>
                             {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- CIS 71 - Permisos en archivo sqlnet.ora -->
+                    {% if instance_data.cis_71 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 71</span>
+                                {{ instance_data.cis_71.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_71.compliant_initial else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_71.compliant_initial else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_71.description }}</span>
+                                {{ instance_data.cis_71.implementacion }}
+                            </p>
+                            
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            {% if not instance_data.cis_71.instance_user_valid %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Advertencia:</strong> El usuario que ejecuta la instancia ({{ instance_data.cis_71.instance_user }}) 
+                                no cumple con la convención requerida (debe seguir el patrón 'ora' + 3-4 caracteres, como ora19c, o ser el usuario 'grid').</p>
+                            </div>
+                            {% endif %}
+                            
+                            <h4>Estado del archivo sqlnet.ora</h4>
+                            <table>
+                                <tr>
+                                    <th>Archivo</th>
+                                    <th>Existe</th>
+                                    <th>Propietario</th>
+                                    <th>Grupo</th>
+                                    <th>Permisos</th>
+                                    <th>Problemas</th>
+                                </tr>
+                                {% if instance_data.cis_71.file_exists %}
+                                <tr class="{{ 'pass' if instance_data.cis_71.file_details.compliant else 'fail' }}">
+                                    <td>{{ instance_data.cis_71.file_details.path | basename }}</td>
+                                    <td>Sí</td>
+                                    <td>{{ instance_data.cis_71.file_details.owner }}</td>
+                                    <td>{{ instance_data.cis_71.file_details.group }}</td>
+                                    <td>{{ instance_data.cis_71.file_details.mode }}</td>
+                                    <td>
+                                        {% if not instance_data.cis_71.file_details.compliant %}
+                                        <ul style="margin: 0; padding-left: 20px;">
+                                            {% if not instance_data.cis_71.file_details.owner_valid %}<li>No pertenece al usuario de instancia: {{ instance_user }}</li>{% endif %}
+                                            {% if not instance_data.cis_71.file_details.naming_valid %}<li>Propietario no válido (debe seguir patrón 'ora' + 3-4 caracteres o ser 'grid')</li>{% endif %}
+                                            {% if not instance_data.cis_71.file_details.group_valid %}<li>Grupo incorrecto: debe ser dba, oinstall o asmdba</li>{% endif %}
+                                            {% if not instance_data.cis_71.file_details.permission_valid %}<li>Permisos excesivos: debe ser 755 o más restrictivo</li>{% endif %}
+                                        </ul>
+                                        {% else %}
+                                        <span class="status-indicator status-success">Conforme</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr class="fail">
+                                    <td>sqlnet.ora</td>
+                                    <td>No</td>
+                                    <td>N/A</td>
+                                    <td>N/A</td>
+                                    <td>N/A</td>
+                                    <td><span class="status-indicator status-danger">Archivo no encontrado</span></td>
+                                </tr>
+                                {% endif %}
+                            </table>
+                            
+                            {% if not instance_data.cis_71.compliant_initial %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Acción recomendada:</strong></p>
+                                <pre>
+                    {% if not instance_data.cis_71.file_exists %}
+                    # Crear archivo sqlnet.ora si no existe
+                    touch {{ instance_home }}/network/admin/sqlnet.ora
+                    {% endif %}
+
+                    # Asignar propietario correcto
+                    chown {{ instance_data.cis_71.instance_user }} {{ instance_home }}/network/admin/sqlnet.ora
+
+                    # Asignar grupo correcto
+                    chgrp dba {{ instance_home }}/network/admin/sqlnet.ora
+
+                    # Establecer permisos
+                    chmod 0755 {{ instance_home }}/network/admin/sqlnet.ora
+                                </pre>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="info-box">
+                                <p><strong>Objetivo:</strong> {{ instance_data.cis_71.objetivo }}</p>
+                                <p><strong>Verificación:</strong> {{ instance_data.cis_71.verificacion }}</p>
+                                <p><strong>Nota:</strong> {{ instance_data.cis_71.nota }}</p>
+                            </div>
                         </div>
                     </div>
                     {% endif %}
@@ -9331,6 +9419,61 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 71 - Permisos en archivo sqlnet.ora -->
+                    {% if instance_data.cis_71 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 71</span>
+                                {{ instance_data.cis_71.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_71.compliant_final else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_71.compliant_final else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            <h4>Estado del archivo sqlnet.ora</h4>
+                            <table>
+                                <tr>
+                                    <th>Archivo</th>
+                                    <th>Existe</th>
+                                    <th>Propietario</th>
+                                    <th>Grupo</th>
+                                    <th>Permisos</th>
+                                    <th>Estado</th>
+                                </tr>
+                                {% if instance_data.cis_71.file_exists %}
+                                <tr class="{{ 'pass' if instance_data.cis_71.file_details.compliant else 'fail' }}">
+                                    <td>{{ instance_data.cis_71.file_details.path | basename }}</td>
+                                    <td>Sí</td>
+                                    <td>{{ instance_data.cis_71.file_details.owner }}</td>
+                                    <td>{{ instance_data.cis_71.file_details.group }}</td>
+                                    <td>{{ instance_data.cis_71.file_details.mode }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_71.file_details.compliant else 'No Conforme' }}</td>
+                                </tr>
+                                {% else %}
+                                <tr class="fail">
+                                    <td>sqlnet.ora</td>
+                                    <td>No</td>
+                                    <td>N/A</td>
+                                    <td>N/A</td>
+                                    <td>N/A</td>
+                                    <td>Archivo no encontrado</td>
+                                </tr>
+                                {% endif %}
+                            </table>
+                            
+                            {% if not instance_data.cis_71.compliant_final %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Atención:</strong> Este control requiere remediación manual. El archivo sqlnet.ora debe tener permisos 755 o más restrictivos y pertenecer al usuario de la instancia y a un grupo válido (dba, oinstall, asmdba).</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 
                 <!-- Tab: Comparación (instancia específica) -->
@@ -11813,8 +11956,6 @@
 
                         <!-- CIS 70 - Archivos de configuración de red Oracle -->
                         {% if instance_data.cis_70 is defined %}
-                        {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-
                         <tr>
                             <td>
                                 <span class="control-id">CIS 70</span>
@@ -11832,6 +11973,42 @@
                                 <span class="change-indicator manual">Requiere revisión manual</span>
                                 {% elif instance_data.cis_70.compliant_initial and instance_data.cis_70.compliant_final %}
                                 <span class="change-indicator neutral">Ya conforme</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+
+                        <!-- CIS 71 - Permisos en archivo sqlnet.ora -->
+                        {% if instance_data.cis_71 is defined %}
+                        <tr>
+                            <td>
+                                <span class="control-id">CIS 71</span>
+                                {{ instance_data.cis_71.parametro }}
+                                <br><small>Usuario: {{ instance_user }}</small>
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_71.compliant_initial else 'fail' }}">
+                                {% if not instance_data.cis_71.file_exists %}
+                                    No Conforme (Archivo no encontrado)
+                                {% else %}
+                                    {{ 'Conforme' if instance_data.cis_71.compliant_initial else 'No Conforme' }}
+                                {% endif %}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_71.compliant_final else 'fail' }}">
+                                {% if not instance_data.cis_71.file_exists %}
+                                    No Conforme (Archivo no encontrado)
+                                {% else %}
+                                    {{ 'Conforme' if instance_data.cis_71.compliant_final else 'No Conforme' }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if instance_data.cis_71.was_remediated %}
+                                    <span class="change-indicator positive">✓ Remediado</span>
+                                {% elif instance_data.cis_71.compliant_initial and instance_data.cis_71.compliant_final %}
+                                    <span class="change-indicator neutral">Ya conforme</span>
+                                {% elif not instance_data.cis_71.compliant_initial and not instance_data.cis_71.compliant_final %}
+                                    <span class="change-indicator manual">Requiere revisión manual</span>
+                                {% else %}
+                                    <span class="change-indicator negative">Degradado</span>
                                 {% endif %}
                             </td>
                         </tr>

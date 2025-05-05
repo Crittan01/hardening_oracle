@@ -815,7 +815,7 @@
     - autorizacion
     - cis_69
 
-- name: Incluir CIS 70
+- name: Incluir CIS 70 - Archivos en el directorio $ORACLE_HOME/network/admin
   ansible.builtin.include_tasks:
     file: autorizacion/cis_70.yml
     apply:
@@ -825,3 +825,14 @@
   tags:
     - autorizacion
     - cis_70
+
+- name: Incluir CIS 71 - sqlnet.ora
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_71.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_71
+  tags:
+    - autorizacion
+    - cis_71
