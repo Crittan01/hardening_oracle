@@ -1,0 +1,77 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_sn.yml
+---
+- name: Verificar cuenta de instalación Oracle
+  block:
+    # Verificar la existencia del usuario "oracle" en /etc/passwd
+    - name: (Check - CIS SN) - Verificar si existe el usuario "oracle"
+      ansible.builtin.command:
+        cmd: |
+          grep -i "^oracle:" /etc/passwd
+      register: cuenta_oracle_result
+      changed_when: false
+      failed_when: false # false, para que NO falle, si el usuario no existe
+
+    # Determinar si la cuenta oracle existe
+    - name: (Check - CIS SN) - Procesar resultados
+      ansible.builtin.set_fact:
+        cuenta_oracle_existe: "{{ cuenta_oracle_result.rc == 0 }}"
+        cuenta_oracle_detalles: "{{ cuenta_oracle_result.stdout if cuenta_oracle_result.rc == 0 else 'No existe' }}"
+
+    # Verificar el usuario que está corriendo Oracle
+    - name: (Check - CIS SN) - Verificar usuario que ejecuta Oracle
+      ansible.builtin.shell:
+        cmd: |
+          ps -ef | grep -i "[o]ra_pmon" | head -1 | awk '{print $1}'
+        executable: /bin/bash
+      register: oracle_process_user
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    # Determinar el usuario que ejecuta Oracle
+    - name: (Check - CIS SN) - Procesar usuario de Oracle
+      ansible.builtin.set_fact:
+        oracle_actual_user: "{{ oracle_process_user.stdout | trim }}"
+        oracle_usando_default: "{{ oracle_process_user.stdout | trim == 'oracle' }}"
+
+    # Establecer conformidad - Es conforme si NO se está usando "oracle" como usuario
+    - name: (Check - CIS SN) - Establecer estado de conformidad
+      ansible.builtin.set_fact:
+        cuenta_instal_compliant_initial: "{{ not oracle_usando_default }}"
+        cuenta_instal_compliant_final: "{{ not oracle_usando_default }}"
+        cuenta_instal_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS SN) - Mostrar resultados de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Cuenta 'oracle' existe en /etc/passwd: {{ cuenta_oracle_existe }}"
+          - "Usuario actual que ejecuta Oracle: {{ oracle_actual_user }}"
+          - "¿Usando el usuario predeterminado 'oracle'?: {{ oracle_usando_default }}"
+          - "Cumplimiento: {{ cuenta_instal_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados de CIS SN a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_sn] }}"
+      vars:
+        instance_result_cis_sn:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_sn:
+            parametro: "Cuenta de Instalación"
+            description: "No seleccionar el nombre 'ORACLE' para la cuenta de instalación."
+            implementacion: |
+              Seleccionar un nombre diferente a 'ORACLE' para la cuenta de instalación y ejecución del servicio.
+              Este nombre es de fácil deducción y puedes ser aprovechado para ataques de fuerza bruta.
+            verificacion: >-
+              Verificar la existencia de la cuenta: No seleccionar el nombre ‘ORACLE’ para la cuenta de instalación.
+            nota: Utilizar el nombre predeterminado 'oracle' para la cuenta de instalación facilita los ataques de fuerza bruta.
+            comando: grep -i oracle /etc/passwd"
+            type: "verification"
+            usuario_existe: "{{ cuenta_oracle_existe }}"
+            usuario_actual: "{{ oracle_actual_user }}"
+            usando_default: "{{ oracle_usando_default }}"
+            compliant_initial: "{{ cuenta_instal_compliant_initial }}"
+            compliant_final: "{{ cuenta_instal_compliant_final }}"
+            was_remediated: "{{ cuenta_instal_was_remediated }}"

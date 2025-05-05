@@ -1,0 +1,95 @@
+# roles/hardening/tasks/autorizacion/cis_52.yml
+---
+- name: CIS 52 - Verificación de uso de WITH GRANT
+  block:
+    # Paso 1: Ejecutar la consulta detallada proporcionada en el instructivo
+    - name: (Check - CIS 52) - Verificar asignación de privilegios WITH GRANT
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select * from dba_role_privs where admin_option='YES' and grantee not in (select username from dba_users )
+        and grantee not in ('SYS','SYSTEM','DV_OWNER','DBA','PDB_DBA','RECOVERY_CATALOG_OWNER_VPD','DV_ACCTMGR');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_52_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 52) - Contar asignaciones de privilegios WITH GRANT
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select * from dba_role_privs where admin_option='YES' and grantee not in (select username from dba_users )
+        and grantee not in ('SYS','SYSTEM','DV_OWNER','DBA','PDB_DBA','RECOVERY_CATALOG_OWNER_VPD','DV_ACCTMGR'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_52_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 52) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_52_count: "{{ cis_52_count_result.stdout | trim | int }}"
+        cis_52_detail_raw: "{{ cis_52_detail_result.stdout_lines | default([]) }}"
+        cis_52_expected_count: 0
+
+    # Paso 4: Determinar estado de conformidad
+    - name: (Check - CIS 52) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_52_compliant_initial: "{{ cis_52_count | int == 0 }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 52) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de roles/usuarios con WITH GRANT: {{ cis_52_count }}"
+          - "Estado de conformidad: {{ cis_52_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 52) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_52_needs_remediation: "{{ not cis_52_compliant_initial }}"
+        cis_52_compliant_final: "{{ cis_52_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_52_was_remediated: false
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 52 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_52] }}"
+      vars:
+        instance_result_cis_52:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_52:
+            parametro: "WITH GRANT"
+            description: "Restringir el uso de privilegios WITH GRANT."
+            implementacion: |
+              Revisar los roles y usuarios que tengan asignados los privilegios "WITH GRANT", y retirarlos si no son requeridos.
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM
+              select * from dba_role_privs where admin_option='YES' and grantee not in (select username from dba_users )
+              and grantee not in ('SYS','SYSTEM','DV_OWNER','DBA','PDB_DBA','RECOVERY_CATALOG_OWNER_VPD','DV_ACCTMGR');
+            remediacion: |
+              Revocar los privilegios WITH GRANT a los roles o usuarios no autorizados.
+              Ejemplo: REVOKE [privilege] FROM [grantee] [CASCADE];
+            nota: >-
+              Este control requiere remediación manual. El privilegio WITH GRANT permite al grantee otorgar
+              a su vez el privilegio a otros usuarios, lo que aumenta el riesgo de escalación de privilegios.
+            type: "security"
+            expected_count: "{{ cis_52_expected_count }}"
+            actual_count: "{{ cis_52_count }}"
+            detail_raw: "{{ cis_52_detail_raw }}"
+            compliant_initial: "{{ cis_52_compliant_initial }}"
+            compliant_final: "{{ cis_52_compliant_final }}"
+            needs_remediation: "{{ cis_52_needs_remediation }}"
+            was_remediated: "{{ cis_52_was_remediated }}"

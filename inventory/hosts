@@ -1,0 +1,8 @@
+[oracle_servers]
+oracle7db ansible_host=192.168.20.230
+
+[oracle_servers:vars]
+ansible_connection = ssh
+
+[server_local]
+server_ansible ansible_host=192.168.20.85

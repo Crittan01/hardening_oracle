@@ -1,0 +1,177 @@
+---
+- name: CIS 69 - Verificación de parámetros log_archive_dest_n y sus permisos
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 69) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_69_valid_pattern: "^ora[a-zA-Z0-9]{3,4}$"
+        cis_69_invalid_users: ["oracle"]
+        cis_69_explict_valid_users: ["grid"]
+        cis_69_valid_groups: ["dba", "oinstall", "asmdba"]
+        cis_69_instance_user_valid: "{{
+          hardening_current_user is match('^ora[a-zA-Z0-9]{3,4}$') and
+          hardening_current_user != 'oracle' or
+          hardening_current_user in ['grid'] }}"
+        cis_69_params: []
+        cis_69_path_details: []
+        cis_69_compliant_paths: []
+        cis_69_non_compliant_paths: []
+
+    # Obtener parámetros log_archive_dest_n
+    - name: (Check - CIS 69) - Obtener parámetros log_archive_dest_n
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT name || ',' || value FROM v\$parameter WHERE REGEXP_LIKE(name, '^log_archive_dest_[0-9]+$') ORDER BY name;
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_69_params_result
+      changed_when: false
+
+    # Procesar parámetros
+    - name: (Check - CIS 69) - Procesar parámetros log_archive_dest_n
+      ansible.builtin.set_fact:
+        cis_69_params: "{{ cis_69_params +
+          [{'name': param_parts[0],
+          'value': param_parts[1:] | join(',') | trim}] }}"
+      vars:
+        param_parts: "{{ param_line.split(',') }}"
+      loop: "{{ cis_69_params_result.stdout_lines }}"
+      loop_control:
+        loop_var: param_line
+      when: cis_69_params_result.stdout_lines | length > 0 and param_line | length > 0
+
+    # Extraer rutas de parámetros
+    - name: (Check - CIS 69) - Extraer rutas de parámetros
+      ansible.builtin.set_fact:
+        cis_69_params_with_paths: "{{ cis_69_params_with_paths | default([]) + [param_with_path] }}"
+      vars:
+        param_value: "{{ item.value }}"
+        extracted_path: "{{
+          (param_value | regex_search('LOCATION=([^,\\s]+)', '\\1') | first)
+          if (param_value | regex_search('LOCATION=([^,\\s]+)', '\\1'))
+          else (param_value.split(':')[0] if ':' in param_value else param_value) }}"
+        param_with_path:
+          {
+            "name": "{{ item.name }}",
+            "value": "{{ item.value }}",
+            "path": "{{ extracted_path }}",
+          }
+      loop: "{{ cis_69_params }}"
+      when: item.value | length > 0 and item.value not in ['', '?', 'NONE']
+
+    # Verificar archivos/directorios
+    - name: (Check - CIS 69) - Verificar permisos de rutas
+      ansible.builtin.stat:
+        path: "{{ path_item.path }}"
+        get_attributes: true
+      register: cis_69_stat_results
+      loop: "{{ cis_69_params_with_paths | default([]) }}"
+      loop_control:
+        loop_var: path_item
+      become: true
+      when: cis_69_params_with_paths is defined and cis_69_params_with_paths | length > 0
+
+    # Procesar resultados
+    - name: (Check - CIS 69) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_69_path_details: "{{ cis_69_path_details + [path_detail] }}"
+        cis_69_compliant_paths: "{{ cis_69_compliant_paths + [dir_item.stat.path] if path_compliant else cis_69_compliant_paths }}"
+        cis_69_non_compliant_paths: "{{ cis_69_non_compliant_paths + [path_detail] if not path_compliant else cis_69_non_compliant_paths }}"
+      vars:
+        # Definir criterios de validación
+        valid_owner: "{{ dir_item.stat.exists and dir_item.stat.pw_name == hardening_current_user }}"
+        valid_naming: "{{
+          dir_item.stat.exists and
+          (dir_item.stat.pw_name is match(cis_69_valid_pattern) and dir_item.stat.pw_name not in cis_69_invalid_users) or
+          dir_item.stat.pw_name in cis_69_explict_valid_users }}"
+        valid_group: "{{ dir_item.stat.exists and dir_item.stat.gr_name in cis_69_valid_groups }}"
+        valid_permission: "{{
+          dir_item.stat.exists and
+          (dir_item.stat.mode | regex_replace('^0', '') | int(base=8) <= 0o750) }}"
+        # Determinar cumplimiento general
+        path_compliant: "{{ dir_item.stat.exists and valid_owner and valid_naming and valid_group and valid_permission }}"
+        # Crear objeto con detalles
+        path_detail:
+          {
+            "param_name": "{{ dir_item.item.name }}",
+            "param_value": "{{ dir_item.item.value }}",
+            "path": "{{ dir_item.stat.path }}",
+            "exists": "{{ dir_item.stat.exists }}",
+            "owner": "{{ dir_item.stat.pw_name if dir_item.stat.exists else 'N/A' }}",
+            "group": "{{ dir_item.stat.gr_name if dir_item.stat.exists else 'N/A' }}",
+            "mode": "{{ dir_item.stat.mode if dir_item.stat.exists else 'N/A' }}",
+            "owner_valid": "{{ valid_owner }}",
+            "naming_valid": "{{ valid_naming }}",
+            "group_valid": "{{ valid_group }}",
+            "permission_valid": "{{ valid_permission }}",
+            "compliant": "{{ path_compliant }}",
+          }
+      loop: "{{ cis_69_stat_results.results | default([]) }}"
+      loop_control:
+        loop_var: dir_item
+      when: cis_69_stat_results is defined
+
+    # Determinar estado general
+    - name: (Check - CIS 69) - Establecer estado general
+      ansible.builtin.set_fact:
+        cis_69_total_params: "{{ cis_69_params | length }}"
+        cis_69_total_paths: "{{ cis_69_path_details | length }}"
+        cis_69_valid_count: "{{ cis_69_compliant_paths | length }}"
+        cis_69_invalid_count: "{{ cis_69_non_compliant_paths | length }}"
+        cis_69_compliant_initial: "{{ cis_69_non_compliant_paths | length == 0 and cis_69_path_details | length > 0 }}"
+        cis_69_compliant_final: "{{ cis_69_non_compliant_paths | length == 0 and cis_69_path_details | length > 0 }}"
+        cis_69_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 69) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Instancia: {{ hardening_current_instance }}"
+          - "Parámetros encontrados: {{ cis_69_total_params }}"
+          - "Rutas válidas: {{ cis_69_valid_count }}"
+          - "Rutas no válidas: {{ cis_69_invalid_count }}"
+          - "Estado de cumplimiento: {{ cis_69_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_69] }}"
+      vars:
+        instance_result_cis_69:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_69:
+            parametro: "init.ora log_archive_dest_n"
+            description: "Verificación de los parámetros log_archive_dest_n y permisos de las rutas"
+            implementacion: |
+              Los parámetros log_archive_dest_n deben configurarse con rutas válidas perteneciente
+              al usuario que ejecuta la instancia (patrón 'ora' + 3-4 caracteres o 'grid') y grupo
+              válido (dba, oinstall, asmdba). Los permisos deben ser 0750 o más restrictivos.
+            verificacion: >-
+              Verificar los parámetros log_archive_dest_1, log_archive_dest_2, etc. y los permisos
+              de los directorios especificados.
+            objetivo: >-
+              Asegurar que los destinos de archivos de log de archivo (archive logs) tengan
+              permisos restrictivos y pertenezcan al usuario correcto.
+            commando: |
+              SQL> SHOW PARAMETER log_archive_dest;
+              ls -la <ruta_log_archive_dest>
+            nota: "Los permisos 0750 significan rwxr-x--- (propietario: rwx, grupo: r-x, otros: ---)"
+            type: "filesystem"
+            params_count: "{{ cis_69_total_params }}"
+            path_details: "{{ cis_69_path_details }}"
+            instance_user: "{{ hardening_current_user }}"
+            instance_user_valid: "{{ cis_69_instance_user_valid }}"
+            valid_pattern: "{{ cis_69_valid_pattern }}"
+            valid_groups: "{{ cis_69_valid_groups }}"
+            total_paths: "{{ cis_69_total_paths }}"
+            valid_count: "{{ cis_69_valid_count }}"
+            invalid_count: "{{ cis_69_invalid_count }}"
+            compliant_initial: "{{ cis_69_compliant_initial }}"
+            compliant_final: "{{ cis_69_compliant_final }}"
+            was_remediated: false

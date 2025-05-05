@@ -1,0 +1,102 @@
+# roles/hardening/tasks/autenticacion/cis_48.yml
+---
+- name: CIS 48 - Verificación de restricción de privilegios del sistema
+  block:
+    # Paso 1: Verificar privilegios del sistema (consulta detallada)
+    - name: (Check - CIS 48) - Verificar privilegios del sistema
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select * from dba_sys_privs where grantee not in (select granted_role from dba_role_privs where granted_role='DBA') and grantee not in
+        ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,'DIP','XSNULL' ,
+        'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM'  ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,'ANONYMOUS','WMSYS' ,
+        'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_48_detail_result
+      changed_when: false
+
+    # Paso 2: Verificar conteo de privilegios no autorizados
+    - name: (Check - CIS 48) - Contar privilegios del sistema
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select * from dba_sys_privs where grantee not in (select granted_role from dba_role_privs where granted_role='DBA')
+        and grantee not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,'DIP',
+        'XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM'  ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,'ANONYMOUS','WMSYS' ,
+        'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF'););
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_48_count_result
+      changed_when: false
+
+    # Paso 3: Procesar los resultados obtenidos
+    - name: (Check - CIS 48) - Procesar resultados de privilegios del sistema
+      ansible.builtin.set_fact:
+        cis_48_privileges_count: "{{ cis_48_count_result.stdout | trim | int }}"
+        cis_48_privileges_details: "{{ cis_48_detail_result.stdout }}"
+
+    # Paso 4: Determinar el estado de cumplimiento
+    - name: (Check - CIS 48) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_48_compliant_initial: "{{ (cis_48_privileges_count | int) == 0 }}"
+        cis_48_unauthorized_privileges: "{{ (cis_48_privileges_count | int) > 0 }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 48) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Número de privilegios de sistema no autorizados: {{ cis_48_privileges_count }}"
+          - "Estado de cumplimiento: {{ cis_48_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Establecer estado final (control informativo, no hay remediación automática)
+    - name: (Info - CIS 48) - Establecer estado final (control informativo)
+      ansible.builtin.set_fact:
+        cis_48_was_remediated: false
+        cis_48_compliant_final: "{{ cis_48_compliant_initial }}"
+        cis_48_remediation_notes: "Este control requiere revisión manual de los privilegios del sistema asignados a usuarios no privilegiados."
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 48 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_48] }}"
+      vars:
+        instance_result_cis_48:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_48:
+            parametro: "Privilegios de Sistema"
+            description: "Restringir privilegios del sistema."
+            implementacion: |
+              Todos los privilegios del sistema, excepto CREATE SESSION, deben estar restringidos para DBAs,
+              cuentas propietarias de objetos, y cuentas por defecto.
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM.
+            commando: |
+              <br>select * from dba_sys_privs where grantee not in (select granted_role from dba_role_privs where granted_role='DBA')
+              and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST','DVSYS','CTXSYS',
+              'ORACLE_OCM','SELECT_CATALOG_ROLE','AUDIT_ADMIN','OLAP_XS_ADMIN','MDSYS');
+              <br>select count(*) valor from (select * from dba_sys_privs where grantee not in
+              (select granted_role from dba_role_privs where granted_role='DBA')
+              and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST','DVSYS','CTXSYS',
+              'ORACLE_OCM','SELECT_CATALOG_ROLE','AUDIT_ADMIN','OLAP_XS_ADMIN','MDSYS'));
+            nota: >-
+              <strong>Control informativo.</strong> La remediación debe realizarse manualmente para cada privilegio no autorizado identificado.
+              Para revocar un privilegio de sistema, use: REVOKE [privilegio] FROM [usuario];
+              Este control es considerado conforme si no se detectan privilegios no autorizados (conteo = 0).
+            type: "authentication"
+            privileges_count: "{{ cis_48_privileges_count }}"
+            privileges_details: "{{ cis_48_privileges_details }}"
+            unauthorized_privileges: "{{ cis_48_unauthorized_privileges }}"
+            remediation_notes: "{{ cis_48_remediation_notes }}"
+            compliant_initial: "{{ cis_48_compliant_initial }}"
+            compliant_final: "{{ cis_48_compliant_final }}"
+            was_remediated: "{{ cis_48_was_remediated }}"

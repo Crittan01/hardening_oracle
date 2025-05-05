@@ -1,0 +1,116 @@
+# roles/hardening/tasks/autenticacion/cis_46.yml
+---
+- name: CIS 46 - Verificación de restricción de acceso a tablas de sistema
+  block:
+    # Paso 1: Verificar accesos a tablas de sistema (consulta detallada)
+    - name: (Check - CIS 46) - Verificar acceso detallado a tablas de sistema
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select * from dba_tab_privs where table_name in ('SYS.AUD$','SYS.USER_HISTORY$','SYS.LINK$','SYS.USER$','SYS.SOURCE$','X$','V_$')
+        and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST',
+        'DBA','SELECT_CATALOG_ROLE','DVSYS','ORDSYS','CTXSYS','WM_ADMIN_ROLE','SYSRAC','SYSDG','AQ_ADMINISTRATOR_ROLE',
+        'AUDIT_VIEWER','AUDSYS','AUDIT_ADMIN','ADM_PARALLEL_EXECUTE_TASK','APPQOSSYS','GSMUSER_ROLE','MDSYS',
+        'OLAP_XS_ADMIN','DATAPATCH_ROLE','ACCHK_READ','XS_CACHE_ADMIN','CAPTURE_ADMIN','ORACLE_OCM','DBSFWUSER',
+        'SYSKM','ORDPLUGINS','SYSKM','JAVADEBUGPRIV','WMSYS','DV_REALM_OWNER','WMSYS');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_46_detail_result
+      changed_when: false
+
+    # Paso 2: Verificar conteo de accesos no autorizados
+    - name: (Check - CIS 46) - Contar accesos no autorizados a tablas de sistema
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select * from dba_tab_privs where table_name in ('SYS.AUD$','SYS.USER_HISTORY$','SYS.LINK$','SYS.USER$','SYS.SOURCE$','X$','V_$')
+        and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST',
+        'DBA','SELECT_CATALOG_ROLE','DVSYS','ORDSYS','CTXSYS','WM_ADMIN_ROLE','SYSRAC','SYSDG','AQ_ADMINISTRATOR_ROLE',
+        'AUDIT_VIEWER','AUDSYS','AUDIT_ADMIN','ADM_PARALLEL_EXECUTE_TASK','APPQOSSYS','GSMUSER_ROLE','MDSYS',
+        'OLAP_XS_ADMIN','DATAPATCH_ROLE','ACCHK_READ','XS_CACHE_ADMIN','CAPTURE_ADMIN','ORACLE_OCM','DBSFWUSER',
+        'SYSKM','ORDPLUGINS','SYSKM','JAVADEBUGPRIV','WMSYS','DV_REALM_OWNER','WMSYS'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_46_count_result
+      changed_when: false
+
+    # Paso 3: Procesar los resultados obtenidos
+    - name: (Check - CIS 46) - Procesar resultados de acceso a tablas de sistema
+      ansible.builtin.set_fact:
+        cis_46_access_count: "{{ cis_46_count_result.stdout | trim | int }}"
+        cis_46_access_details: "{{ cis_46_detail_result.stdout }}"
+
+    # Paso 4: Determinar el estado de cumplimiento
+    - name: (Check - CIS 46) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_46_compliant_initial: "{{ (cis_46_access_count | int) == 0 }}"
+        cis_46_unauthorized_access: "{{ (cis_46_access_count | int) > 0 }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 46) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Número de accesos no autorizados detectados: {{ cis_46_access_count }}"
+          - "Estado de cumplimiento: {{ cis_46_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Establecer estado final (control informativo, no hay remediación automática)
+    - name: (Info - CIS 46) - Establecer estado final (control informativo)
+      ansible.builtin.set_fact:
+        cis_46_was_remediated: false
+        cis_46_compliant_final: "{{ cis_46_compliant_initial }}"
+        cis_46_remediation_notes: "Este control requiere revisión manual de los permisos asignados a usuarios no privilegiados."
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 46 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_46] }}"
+      vars:
+        instance_result_cis_46:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_46:
+            parametro: "Restringir acceso a tablas de sistema"
+            description: "Es necesario garantizar el principio de mínimo privilegio de acceso a las tablas de sistema."
+            implementacion: |
+              Retirar el permiso de acceso a las siguientes tablas para los usuarios que no lo requieran:
+              * SYS.AUDS
+              * SYS.USER_HISTORY$
+              * SYS.LINKS
+              * SYS.USERS
+              * SYS.SOURCES
+              * X$
+              * DBA
+              * V_$
+              * ALL_SOURCE
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM.
+            commando: |
+              <br>select * from dba_tab_privs where table_name in ('SYS.AUD$','SYS.USER_HISTORY$','SYS.LINK$','SYS.USER$','SYS.SOURCE$','X$','V_$')
+              and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST', 'DBA','SELECT_CATALOG_ROLE','DVSYS',
+              'ORDSYS','CTXSYS','WM_ADMIN_ROLE','SYSRAC','SYSDG','AQ_ADMINISTRATOR_ROLE','AUDIT_VIEWER','AUDSYS','AUDIT_ADMIN','ADM_PARALLEL_EXECUTE_TASK',
+              'APPQOSSYS','GSMUSER_ROLE','MDSYS','OLAP_XS_ADMIN','DATAPATCH_ROLE','ACCHK_READ','XS_CACHE_ADMIN','CAPTURE_ADMIN','ORACLE_OCM','DBSFWUSER','SYSKM',
+              'ORDPLUGINS','SYSKM','JAVADEBUGPRIV','WMSYS','DV_REALM_OWNER','WMSYS') ;
+              <br>select count(*) valor from (select * from dba_tab_privs where table_name in ('SYS.AUD$','SYS.USER_HISTORY$','SYS.LINK$','SYS.USER$',
+              'SYS.SOURCE$','X$','V_$') and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST', 'DBA',
+              'SELECT_CATALOG_ROLE','DVSYS','ORDSYS','CTXSYS','WM_ADMIN_ROLE','SYSRAC','SYSDG','AQ_ADMINISTRATOR_ROLE','AUDIT_VIEWER','AUDSYS','AUDIT_ADMIN',
+              'ADM_PARALLEL_EXECUTE_TASK','APPQOSSYS','GSMUSER_ROLE','MDSYS','OLAP_XS_ADMIN','DATAPATCH_ROLE','ACCHK_READ','XS_CACHE_ADMIN','CAPTURE_ADMIN',
+              'ORACLE_OCM','DBSFWUSER','SYSKM','ORDPLUGINS','SYSKM','JAVADEBUGPRIV','WMSYS','DV_REALM_OWNER','WMSYS')) ;
+            nota: >-
+              <strong>Control informativo.</strong> La remediación debe realizarse manualmente para cada usuario no autorizado identificado.
+              Este control es considerado conforme si no se detectan accesos no autorizados (conteo = 0).
+            type: "authentication"
+            access_count: "{{ cis_46_access_count }}"
+            access_details: "{{ cis_46_access_details }}"
+            unauthorized_access: "{{ cis_46_unauthorized_access }}"
+            remediation_notes: "{{ cis_46_remediation_notes }}"
+            compliant_initial: "{{ cis_46_compliant_initial }}"
+            compliant_final: "{{ cis_46_compliant_final }}"
+            was_remediated: "{{ cis_46_was_remediated }}"

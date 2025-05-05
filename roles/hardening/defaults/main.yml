@@ -1,0 +1,6 @@
+---
+# defaults file for roles/hardening
+
+# Valores por defecto en caso de que no se proporcionen en el playbook
+hardening_oracle_owner: "oracle"
+hardening_oracle_group: "oinstall"

@@ -1,0 +1,104 @@
+---
+- name: CIS 70 - Verificación de archivos críticos en $ORACLE_HOME/network/admin
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 70) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_70_critical_files:
+          - "{{ hardening_oracle_home }}/network/admin/tnsnames.ora"
+          - "{{ hardening_oracle_home }}/network/admin/sqlnet.ora"
+        cis_70_valid_pattern: "^ora[a-zA-Z0-9]{3,4}$"
+        cis_70_invalid_users: ["oracle"]
+        cis_70_explict_valid_users: ["grid"] # Usuarios explícitamente válidos
+        cis_70_valid_groups: ["dba", "oinstall", "asmdba"]
+        cis_70_instance_user_valid: "{{
+          hardening_current_user is match('^ora[a-zA-Z0-9]{3,4}$') and
+          hardening_current_user != 'oracle' or
+          hardening_current_user in ['grid'] }}"
+        cis_70_file_details: []
+        cis_70_compliant_files: []
+        cis_70_non_compliant_files: []
+
+    # Verificar archivos
+    - name: (Check - CIS 70) - Verificar archivos
+      ansible.builtin.stat:
+        path: "{{ file_path }}"
+        get_attributes: true
+      register: cis_70_stat_results
+      loop: "{{ cis_70_critical_files }}"
+      loop_control:
+        loop_var: file_path
+
+    # Procesar resultados
+    - name: (Check - CIS 70) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_70_file_details: "{{ cis_70_file_details + [file_detail] }}"
+        cis_70_compliant_files: "{{ cis_70_compliant_files + [file_item.stat.path] if file_compliant else cis_70_compliant_files }}"
+        cis_70_non_compliant_files: "{{ cis_70_non_compliant_files + [file_detail] if not file_compliant else cis_70_non_compliant_files }}"
+      vars:
+        # Definir criterios de validación
+        valid_owner: "{{ file_item.stat.exists and file_item.stat.pw_name == hardening_current_user }}"
+        valid_naming: "{{
+          file_item.stat.exists and
+          (file_item.stat.pw_name is match(cis_70_valid_pattern) and file_item.stat.pw_name not in cis_70_invalid_users) or
+          file_item.stat.pw_name in cis_70_explict_valid_users }}"
+        valid_group: "{{ file_item.stat.exists and file_item.stat.gr_name in cis_70_valid_groups }}"
+        valid_permission: "{{ file_item.stat.exists and (file_item.stat.mode | regex_replace('^0', '') | int(base=8) <= 0o750) }}"
+        # Determinar cumplimiento general
+        file_compliant: "{{ file_item.stat.exists and valid_owner and valid_naming and valid_group and valid_permission }}"
+        # Crear objeto con detalles
+        file_detail:
+          {
+            "path": "{{ file_item.stat.path }}",
+            "exists": "{{ file_item.stat.exists }}",
+            "owner": "{{ file_item.stat.pw_name if file_item.stat.exists else 'N/A' }}",
+            "group": "{{ file_item.stat.gr_name if file_item.stat.exists else 'N/A' }}",
+            "mode": "{{ file_item.stat.mode if file_item.stat.exists else 'N/A' }}",
+            "owner_valid": "{{ valid_owner }}",
+            "naming_valid": "{{ valid_naming }}",
+            "group_valid": "{{ valid_group }}",
+            "permission_valid": "{{ valid_permission }}",
+            "compliant": "{{ file_compliant }}",
+          }
+      loop: "{{ cis_70_stat_results.results }}"
+      loop_control:
+        loop_var: file_item
+
+    # Determinar estado general
+    - name: (Check - CIS 70) - Establecer estado general
+      ansible.builtin.set_fact:
+        cis_70_compliant_initial: "{{ cis_70_non_compliant_files | length == 0 and cis_70_file_details | length > 0 }}"
+        cis_70_compliant_final: "{{ cis_70_non_compliant_files | length == 0 and cis_70_file_details | length > 0 }}"
+        cis_70_was_remediated: false
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_70] }}"
+      vars:
+        instance_result_cis_70:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_70:
+            parametro: "Archivos de configuración de red Oracle"
+            description: "Verifique y limite los permisos de los archivos de configuración de red"
+            implementacion: |
+              Los archivos tnsnames.ora y sqlnet.ora deben pertenecer al usuario que ejecuta la
+              instancia. Este usuario debe seguir la convención 'ora' + versión (ej: ora19c)
+              o ser el usuario 'grid' (para instancias ASM). Los archivos deben pertenecer a un
+              grupo válido (dba, oinstall, asmdba) y sus permisos deben ser 0750 o más restrictivos.
+            verificacion: >-
+              Verificar propietarios y permisos de archivos en $ORACLE_HOME/network/admin.
+            objetivo: >-
+              Asegurar la protección de la configuración de red Oracle con permisos adecuados.
+            commando: "ls -la $ORACLE_HOME/network/admin/tnsnames.ora $ORACLE_HOME/network/admin/sqlnet.ora"
+            nota: "Los permisos 0750 significan rwxr-x--- (propietario: rwx, grupo: r-x, otros: ---)"
+            type: "filesystem"
+            file_details: "{{ cis_70_file_details }}"
+            instance_user: "{{ hardening_current_user }}"
+            instance_user_valid: "{{ cis_70_instance_user_valid }}"
+            valid_pattern: "{{ cis_70_valid_pattern }}"
+            explicit_valid_users: "{{ cis_70_explict_valid_users }}"
+            valid_groups: "{{ cis_70_valid_groups }}"
+            compliant_initial: "{{ cis_70_compliant_initial }}"
+            compliant_final: "{{ cis_70_compliant_final }}"
+            was_remediated: false

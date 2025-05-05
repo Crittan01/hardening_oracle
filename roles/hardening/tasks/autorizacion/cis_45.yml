@@ -1,0 +1,91 @@
+# roles/hardening/tasks/autorizacion/cis_45.yml
+---
+- name: CIS 45 - Verificación de Permisos de Diccionarios de objetos
+  block:
+    # Paso 1: Ejecutar la consulta detallada proporcionada en el instructivo
+    - name: (Check - CIS 45) - Verificar asignación de privilegios SELECT ANY DICTIONARY
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select * from dba_sys_privs where grantee ='SELECY ANY DICTIONARY';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_45_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 45) - Contar asignaciones de privilegios SELECT ANY DICTIONARY
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select * from dba_sys_privs where grantee ='SELECY ANY DICTIONARY') ;
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_45_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 45) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_45_count: "{{ cis_45_count_result.stdout | trim | int }}"
+        cis_45_detail_raw: "{{ cis_45_detail_result.stdout_lines | default([]) }}"
+        cis_45_expected_count: 0
+
+    # Paso 4: Determinar estado de conformidad
+    - name: (Check - CIS 45) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_45_compliant_initial: "{{ cis_45_count | int == 0 }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 45) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de usuarios con privilegio SELECY ANY DICTIONARY: {{ cis_45_count }}"
+          - "Estado de conformidad: {{ cis_45_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 45) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_45_needs_remediation: "{{ not cis_45_compliant_initial }}"
+        cis_45_compliant_final: "{{ cis_45_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_45_was_remediated: false
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 45 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_45] }}"
+      vars:
+        instance_result_cis_45:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_45:
+            parametro: "Permisos de Diccionarios de objetos"
+            description: "Revisar y retirar permisos de diccionarios de objetos"
+            implementacion: |
+              Retirar el acceso a los usuarios que no lo requieran de los diccionarios de objetos
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM.
+              select * from dba_sys_privs where grantee ='SELECY ANY DICTIONARY';
+            remediacion: |
+              Retirar el acceso a los usuarios que no lo requieran de los diccionarios de objetos
+            nota: >-
+              Este control requiere remediación manual. Se deben revocar los permisos de SELECT ANY DICTIONARY
+              a usuarios no autorizados (diferentes de DBA, SYS y SYSTEM).
+            type: "security"
+            expected_count: "{{ cis_45_expected_count }}"
+            actual_count: "{{ cis_45_count }}"
+            detail_raw: "{{ cis_45_detail_raw }}"
+            compliant_initial: "{{ cis_45_compliant_initial }}"
+            compliant_final: "{{ cis_45_compliant_final }}"
+            needs_remediation: "{{ cis_45_needs_remediation }}"
+            was_remediated: "{{ cis_45_was_remediated }}"

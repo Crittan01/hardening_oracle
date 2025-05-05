@@ -1,0 +1,122 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_24.yml
+---
+- name: CIS 24 - Verificación de sec_protocol_error_further_action
+  block:
+    # Paso 1: Verificar el valor actual del parámetro
+    - name: (Check - CIS 24) - Verificar valor actual de sec_protocol_error_further_action
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='sec_protocol_error_further_action';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_24_param_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 24) - Procesar valor del parámetro
+      ansible.builtin.set_fact:
+        cis_24_param_value: "{{ cis_24_param_result.stdout | trim }}"
+
+    # Paso 3: Establecer el valor esperado y comprobar si contiene DELAY
+    - name: (Check - CIS 24) - Establecer valor esperado y verificar DELAY
+      ansible.builtin.set_fact:
+        cis_24_expected_value: "DELAY"
+        cis_24_contains_delay: "{{ 'DELAY' in cis_24_param_result.stdout | trim | upper }}"
+
+    # Paso 4: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 24) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_24_compliant_initial: "{{ cis_24_contains_delay }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 24) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de sec_protocol_error_further_action: {{ cis_24_param_value }}"
+          - "Contiene DELAY: {{ cis_24_contains_delay }}"
+          - "Estado de cumplimiento: {{ cis_24_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Determinar si se requiere remediación
+    - name: (Check - CIS 24) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_24_needs_remediation: "{{ not cis_24_compliant_initial }}"
+
+    # Paso 7: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 24) - Configurar sec_protocol_error_further_action
+      when: cis_24_needs_remediation
+      block:
+        # Paso 7.1: Aplicar la remediación
+        - name: (Remediation - CIS 24) - Configurar sec_protocol_error_further_action con el valor correcto
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET sec_protocol_error_further_action='DELAY,3' SCOPE=SPFILE SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_24_remediation_result
+          changed_when: "'System altered' in cis_24_remediation_result.stdout"
+
+        # Paso 7.2: Verificar si se requiere reinicio
+        - name: (Remediation - CIS 24) - Indicar que se requiere reiniciar la instancia
+          ansible.builtin.debug:
+            msg: "Se ha modificado el parámetro sec_protocol_error_further_action. Para la instancia {{ hardening_current_instance }}."
+
+        # Paso 7.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 24) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_24_was_remediated: true
+            cis_24_compliant_final: true
+            cis_24_remediated_value: "DELAY,3"
+
+    # Paso 8: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 24) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_24_was_remediated: false
+        cis_24_compliant_final: "{{ cis_24_compliant_initial }}"
+        cis_24_remediated_value: "{{ cis_24_param_value }}"
+      when: not cis_24_needs_remediation | bool
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 24 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_24] }}"
+      vars:
+        instance_result_cis_24:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_24:
+            parametro: "sec_protocol_error_further_action"
+            description: "Tiempo de espera antes de permitir una solicitud de conexión de un cliente después de recibida una solicitud inválida."
+            implementacion: |
+              Configurar el siguiente parámetro:
+              SEC_PROTOCOL_ERROR_FURTHER_ACTION=DELAY <3>
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo init.ora y
+              verifique el parámetro indicado en la implementación.
+            commando: |
+              SELECT name, value, DECODE(Value,'DELAY','Cumple','Revisar') ESTADO
+              FROM v$parameter WHERE name='sec_protocol_error_further_action';
+            remediacion: |
+              ALTER SYSTEM SET sec_protocol_error_further_action='DELAY,3' SCOPE=SPFILE SID='*';
+            nota: >-
+              Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto,
+              ya que se ha configurado con SCOPE=SPFILE. El valor "DELAY,3" establece un retraso de 3 segundos
+              antes de permitir nuevas solicitudes desde un cliente que envió una solicitud de protocolo inválida.
+            type: "parameter"
+            param_value: "{{ cis_24_param_value }}"
+            expected_value: "{{ cis_24_expected_value }}"
+            contains_delay: "{{ cis_24_contains_delay }}"
+            remediated_value: "{{ cis_24_remediated_value }}"
+            compliant_initial: "{{ cis_24_compliant_initial }}"
+            compliant_final: "{{ cis_24_compliant_final }}"
+            was_remediated: "{{ cis_24_was_remediated }}"

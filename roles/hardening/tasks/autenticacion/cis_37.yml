@@ -1,0 +1,111 @@
+# roles/hardening/tasks/autenticacion/cis_37.yml
+---
+- name: CIS 37 - Verificación de SEC_CASE_SENSITIVE_LOGON
+  block:
+    # Paso 1: Verificar el valor actual del parámetro
+    - name: (Check - CIS 37) - Verificar valor actual de SEC_CASE_SENSITIVE_LOGON
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='sec_case_sensitive_logon';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_37_param_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 37) - Procesar valor de SEC_CASE_SENSITIVE_LOGON
+      ansible.builtin.set_fact:
+        cis_37_param_value: "{{ cis_37_param_result.stdout | trim | upper }}"
+        cis_37_expected_value: "TRUE"
+
+    # Paso 3: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 37) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_37_compliant_initial: "{{ cis_37_param_value == cis_37_expected_value }}"
+
+    # Paso 4: Mostrar resultados para depuración
+    - name: (Check - CIS 37) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de SEC_CASE_SENSITIVE_LOGON: {{ cis_37_param_value }}"
+          - "Valor esperado: {{ cis_37_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_37_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 5: Determinar si se requiere remediación
+    - name: (Check - CIS 37) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_37_needs_remediation: "{{ not cis_37_compliant_initial }}"
+
+    # Paso 6: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 37) - Configurar SEC_CASE_SENSITIVE_LOGON
+      when: cis_37_needs_remediation
+      block:
+        # Paso 6.1: Aplicar la remediación
+        - name: (Remediation - CIS 37) - Configurar SEC_CASE_SENSITIVE_LOGON con el valor correcto
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET SEC_CASE_SENSITIVE_LOGON={{ cis_37_expected_value }} SCOPE=SPFILE SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_37_remediation_result
+          changed_when: "'System altered' in cis_37_remediation_result.stdout"
+
+        # Paso 6.2: Verificar si se requiere reinicio
+        - name: (Remediation - CIS 37) - Indicar que se requiere reiniciar la instancia
+          ansible.builtin.debug:
+            msg: "Se ha modificado el parámetro SEC_CASE_SENSITIVE_LOGON. Se requiere reiniciar la instancia {{ hardening_current_instance }}."
+
+        # Paso 6.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 37) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_37_was_remediated: true
+            cis_37_compliant_final: true
+            cis_37_remediated_value: "{{ cis_37_expected_value }} (pendiente reinicio)"
+
+    # Paso 7: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 37) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_37_was_remediated: false
+        cis_37_compliant_final: "{{ cis_37_compliant_initial }}"
+        cis_37_remediated_value: "{{ cis_37_param_value }}"
+      when: not cis_37_needs_remediation | bool
+
+    # Paso 8: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 37 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_37] }}"
+      vars:
+        instance_result_cis_37:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_37:
+            parametro: "Clave sensible a mayúsculas y minúsculas"
+            description: >-
+              Debe asegurarse de configurar la sensibilidad de las mayúsculas y minúsculas en password,
+              esto permitirá que cuando un usuario introduzca una contraseña se valide de manera diferente.
+            implementacion: |
+              Para configurar la sensibilidad a mayúsculas y minúsculas, ejecutar la siguiente sentencia:
+              <br>ALTER SYSTEM SET SEC_CASE_SENSITIVE_LOGON = TRUE;
+            verificacion: >-
+              Para verificar el estado del parámetro SEC_CASE_SENSITIVE_LOGON, ejecute la siguiente sentencia:
+              <br>select name, value, DECODE(Value,'TRUE','Cumple','Revisar') ESTADO from v$parameter where name = 'sec_case_sensitive_logon';
+            commando: "select value from v$parameter where name='sec_case_sensitive_logon';"
+            nota: "Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto"
+            type: "authentication"
+            param_value: "{{ cis_37_param_value }}"
+            expected_value: "{{ cis_37_expected_value }}"
+            remediated_value: "{{ cis_37_remediated_value | default(cis_37_param_value) }}"
+            compliant_initial: "{{ cis_37_compliant_initial }}"
+            compliant_final: "{{ cis_37_compliant_final }}"
+            was_remediated: "{{ cis_37_was_remediated }}"

@@ -1,0 +1,88 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_4.yml
+---
+- name: CIS 4 - Verificación de nombre SID o Servicio
+  block:
+    # Verificar el nombre de instancia desde v$parameter
+    - name: (Check - CIS 4) - Verificar nombre de instancia desde v$parameter
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT name || ',' || value FROM v\$parameter WHERE name='instance_name';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_4_instance_name_result
+      changed_when: false
+
+    # Procesar el resultado de la consulta SQL
+    - name: (Check - CIS 4) - Procesar resultado del nombre de instancia
+      ansible.builtin.set_fact:
+        cis_4_instance_name_parts: "{{ cis_4_instance_name_result.stdout.split(',') | default(['', '']) }}"
+
+    - name: (Check - CIS 4) - Extraer valor del nombre de instancia
+      ansible.builtin.set_fact:
+        cis_4_instance_name_value: "{{ cis_4_instance_name_parts[1] | trim | upper }}"
+
+    # Verificar si el proceso pmon existe con nombre 'ORCL'
+    - name: (Check - CIS 4) - Verificar proceso pmon para ORCL
+      ansible.builtin.shell:
+        cmd: |
+          ps -fea | grep '[o]ra_pmon_ORCL' | wc -l
+        executable: /bin/bash
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_4_pmon_result
+      changed_when: false
+      ignore_errors: true
+
+    # Determinar cumplimiento basado en ambas verificaciones
+    - name: (Check - CIS 4) - Determinar si cumple con el control
+      ansible.builtin.set_fact:
+        cis_4_parameter_compliant: "{{ cis_4_instance_name_value != 'ORCL' }}"
+        cis_4_pmon_compliant: "{{ cis_4_pmon_result.stdout | int == 0 }}"
+
+    - name: (Check - CIS 4) - Determinar cumplimiento general
+      ansible.builtin.set_fact:
+        cis_4_compliant_initial: "{{ cis_4_parameter_compliant and cis_4_pmon_compliant }}"
+        cis_4_compliant_final: "{{ cis_4_parameter_compliant and cis_4_pmon_compliant }}"
+        cis_4_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 4) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Nombre de instancia en v$parameter: {{ cis_4_instance_name_value }}"
+          - "Proceso pmon ORCL encontrado: {{ cis_4_pmon_result.stdout | int > 0 }}"
+          - "Cumple con nombre de instancia: {{ cis_4_parameter_compliant }}"
+          - "Cumple con proceso pmon: {{ cis_4_pmon_compliant }}"
+          - "Estado de cumplimiento general: {{ cis_4_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar los resultados a la lista global de la instancia
+    - name: Agregar resultados del nombre de SID a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_4] }}"
+      vars:
+        instance_result_cis_4:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_4:
+            parametro: "Nombre de SID o Servicio"
+            description: "No usar el nombre por omisión (ORCL)"
+            implementacion: >-
+              No use el nombre por omisión de SID o nombre de servicio de por defecto.
+            verificacion: >-
+              Verificar la configuración establecida.
+            commando: >-
+              - select name,value from v$parameter where name='instance_name';    |    - ps -fea |grep pmon
+            nota: Al momento de crear la Base de datos NO utilice el servicio llamado ORCL
+            type: "configuration"
+            instance_name_value: "{{ cis_4_instance_name_value }}"
+            instance_name_compliant: "{{ cis_4_parameter_compliant }}"
+            pmon_orcl_found: "{{ cis_4_pmon_result.stdout | int > 0 }}"
+            pmon_compliant: "{{ cis_4_pmon_compliant }}"
+            compliant_initial: "{{ cis_4_compliant_initial }}"
+            compliant_final: "{{ cis_4_compliant_final }}"
+            was_remediated: "{{ cis_4_was_remediated }}"

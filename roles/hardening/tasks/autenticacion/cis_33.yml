@@ -1,0 +1,109 @@
+# roles/hardening/tasks/autenticacion/cis_33.yml
+---
+- name: CIS 33 - Verificación de claves por defecto
+  block:
+    # Paso 1: Verificar conteo de usuarios con password por defecto
+    - name: (Check - CIS 33) - Contar usuarios con password por defecto
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (SELECT d.username, u.account_status FROM DBA_USERS_WITH_DEFPWD d, DBA_USERS u WHERE d.username = u.username ORDER BY 2,1);
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_33_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Obtener detalles de los usuarios con password por defecto
+    - name: (Check - CIS 33) - Obtener detalles de usuarios con password por defecto
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT d.username||','||u.account_status  FROM DBA_USERS_WITH_DEFPWD d, DBA_USERS u WHERE d.username = u.username ORDER BY 1;
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_33_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 33) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_33_count: "{{ cis_33_count_result.stdout | trim | int }}"
+        cis_33_detail_raw: "{{ cis_33_detail_result.stdout_lines | select('match', '.+,.+') | list }}"
+        cis_33_expected_count: 0
+
+    # Paso 4: Estructurar datos de usuarios encontrados
+    - name: (Check - CIS 33) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_33_default_pwd_users: []
+
+    # Paso 5: Estructurar datos de usuarios encontrados si existen
+    - name: (Check - CIS 33) - Estructurar datos de usuarios encontrados
+      ansible.builtin.set_fact:
+        cis_33_default_pwd_users: "{{ cis_33_default_pwd_users | default([]) +
+          [{'username': user_item.split(',')[0] | trim,
+          'account_status': user_item.split(',')[1] | trim}] }}"
+      loop: "{{ cis_33_detail_raw }}"
+      loop_control:
+        loop_var: user_item
+      when: cis_33_detail_raw | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 33) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_33_compliant_initial: "{{ cis_33_count | int == 0 }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 33) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de usuarios con password por defecto: {{ cis_33_count }}"
+          - "Usuarios encontrados: {{ cis_33_default_pwd_users | length }}"
+          - "Estado de conformidad: {{ cis_33_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 33) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_33_needs_remediation: "{{ not cis_33_compliant_initial }}"
+        cis_33_compliant_final: "{{ cis_33_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_33_was_remediated: false
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 33 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_33] }}"
+      vars:
+        instance_result_cis_33:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_33:
+            parametro: "Cambiar clave por defecto"
+            description: "Cambiar la clave por defecto no impedirá accesos no autorizados de usuarios malintencionados."
+            implementacion: |
+              Alterar las contraseñas de los usuarios que tienen contraseñas por defecto.
+            verificacion: >-
+              Ejecute el siguiente comando para verificar el estado de los usuarios con password por defecto:
+              select count(*) valor from (SELECT d.username, u.account_status FROM DBA_USERS_WITH_DEFPWD d, DBA_USERS u
+              WHERE d.username = u.username ORDER BY 2,1);
+              SELECT d.username, u.account_status FROM DBA_USERS_WITH_DEFPWD d, DBA_USERS u WHERE d.username = u.username ORDER BY 2,1;
+            remediacion: |
+              Alter user <username> identified by <nuevaclave> ;
+            nota: >-
+              Este control requiere remediación manual. Se debe cambiar la contraseña de cada usuario listado.
+            type: "security"
+            expected_count: "{{ cis_33_expected_count }}"
+            actual_count: "{{ cis_33_count }}"
+            default_pwd_users: "{{ cis_33_default_pwd_users }}"
+            compliant_initial: "{{ cis_33_compliant_initial }}"
+            compliant_final: "{{ cis_33_compliant_final }}"
+            needs_remediation: "{{ cis_33_needs_remediation }}"
+            was_remediated: "{{ cis_33_was_remediated }}"

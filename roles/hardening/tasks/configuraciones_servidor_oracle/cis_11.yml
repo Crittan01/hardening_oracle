@@ -1,0 +1,127 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_11.yml
+---
+- name: CIS 11 - Verificación de os_authent_prefix
+  block:
+    # Paso 1: Verificar el valor actual de os_authent_prefix
+    - name: (Check - CIS 11) - Verificar valor actual de os_authent_prefix
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='os_authent_prefix';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_11_os_authent_prefix_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 11) - Procesar valor de os_authent_prefix
+      ansible.builtin.set_fact:
+        cis_11_os_authent_prefix_value: "{{ cis_11_os_authent_prefix_result.stdout | trim }}"
+        cis_11_os_authent_prefix_is_empty: "{{ cis_11_os_authent_prefix_result.stdout | trim == '' }}"
+
+    # Paso 3: Establecer el valor esperado (cadena vacía)
+    - name: (Check - CIS 11) - Establecer valor esperado
+      ansible.builtin.set_fact:
+        cis_11_expected_value: ""
+
+    # Paso 4: Determinar el estado de cumplimiento inicial
+    # El parámetro debe ser una cadena vacía para cumplir con el requisito
+    - name: (Check - CIS 11) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_11_compliant_initial: "{{ cis_11_os_authent_prefix_is_empty }}"
+
+    # Paso 5: Debug avanzado para ayudar a diagnosticar problemas
+    - name: (Check - CIS 11) - Debug de valores para comparación
+      ansible.builtin.debug:
+        msg:
+          - "Valor os_authent_prefix actual (texto): '{{ cis_11_os_authent_prefix_value }}'"
+          - "¿Es una cadena vacía?: {{ cis_11_os_authent_prefix_is_empty }}"
+          - "Valor esperado (cadena vacía): '{{ cis_11_expected_value }}'"
+          - "Estado de cumplimiento: {{ cis_11_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 11) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de os_authent_prefix: '{{ cis_11_os_authent_prefix_value }}'"
+          - "Valor esperado: cadena vacía"
+          - "Estado de cumplimiento: {{ cis_11_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 11) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_11_needs_remediation: "{{ not cis_11_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 11) - Configurar os_authent_prefix
+      when: cis_11_needs_remediation
+      block:
+        # Paso 8.1: Aplicar la remediación (establecer a cadena vacía)
+        - name: (Remediation - CIS 11) - Configurar os_authent_prefix a cadena vacía
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET os_authent_prefix='' SCOPE=SPFILE SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_11_remediation_result
+          changed_when: "'System altered' in cis_11_remediation_result.stdout"
+
+        # Paso 8.4: Verificar si se requiere reinicio
+        - name: (Remediation - CIS 11) - Indicar que se requiere reiniciar la instancia
+          ansible.builtin.debug:
+            msg: "Se ha modificado el parámetro os_authent_prefix. Para la instancia {{ hardening_current_instance }}."
+
+        # Paso 8.5: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 11) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_11_was_remediated: true
+            cis_11_compliant_final: true
+            cis_11_remediated_value: "{{ '(cadena vacía)' }}"
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 11) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_11_was_remediated: false
+        cis_11_compliant_final: "{{ cis_11_compliant_initial }}"
+        cis_11_remediated_value: "{{ cis_11_os_authent_prefix_value }}"
+      when: not cis_11_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 11 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_11] }}"
+      vars:
+        instance_result_cis_11:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_11:
+            parametro: "os_authent_prefix"
+            description: "Debe ser fijado para limitar el uso externo de una cuenta a un usuario especificado como IDENTIFIED EXTERNALY."
+            implementacion: |
+              En el archivo init.ora, configurar el siguiente parámetro:
+              os_authent_prefix="" (A null string)
+              Con el fin de brindar compatibilidad hacia atrás con versiones anteriores. Se recomienda Null.
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo init.ora y verifique el parámetro indicado en la implementación.
+            commando: |
+              select name, value, DECODE(Value,'','Cumple','Revisar') ESTADO from v$parameter where name='os_authent_prefix';
+            nota: Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto.
+            type: "security"
+            os_authent_prefix_value: "{{ cis_11_os_authent_prefix_value | default('') }}"
+            os_authent_prefix_is_empty: "{{ cis_11_os_authent_prefix_is_empty }}"
+            expected_value: "{{ cis_11_expected_value }}"
+            remediated_value: "{{ cis_11_remediated_value | default(cis_11_os_authent_prefix_value) }}"
+            compliant_initial: "{{ cis_11_compliant_initial }}"
+            compliant_final: "{{ cis_11_compliant_final }}"
+            was_remediated: "{{ cis_11_was_remediated }}"

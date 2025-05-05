@@ -1,0 +1,157 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_31.yml
+---
+- name: CIS 31 - Verificación de EXTPROC_DLLS
+  block:
+    # Paso 1: Verificar la existencia del archivo listener.ora
+    - name: (Check - CIS 31) - Comprobar si existe el archivo listener.ora
+      ansible.builtin.stat:
+        path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+      register: cis_31_listener_file
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Paso 2: Verificar el valor actual del parámetro en listener.ora si existe
+    - name: (Check - CIS 31) - Verificar valor actual de EXTPROC_DLLS
+      ansible.builtin.shell: >-
+        . ~/.bash_profile && grep -i "EXTPROC_DLLS" {{ hardening_oracle_home }}/network/admin/listener.ora || echo "No encontrado"
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_31_grep_result
+      changed_when: false
+      when: cis_31_listener_file.stat.exists
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 31) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_31_listener_exists: "{{ cis_31_listener_file.stat.exists | default(false) }}"
+        cis_31_param_exists:
+          "{{ 'No encontrado' not in cis_31_grep_result.stdout | default('No encontrado')
+          if cis_31_listener_file.stat.exists | default(false) else false }}"
+        cis_31_param_value:
+          "{{ cis_31_grep_result.stdout.split('=')[1] | trim if 'No encontrado' not in cis_31_grep_result.stdout | default('No encontrado')
+          and cis_31_listener_file.stat.exists | default(false) else 'No configurado' }}"
+
+    # Paso 4: Verificar si el parámetro está configurado como ONLY
+    - name: (Check - CIS 31) - Verificar si está configurado como ONLY
+      ansible.builtin.set_fact:
+        cis_31_is_only: "{{ 'ONLY' in cis_31_param_value | default('') | upper }}"
+
+    # Paso 5: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 31) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_31_compliant_initial: "{{ cis_31_param_exists and cis_31_is_only }}"
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 31) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Archivo listener.ora existe: {{ cis_31_listener_exists }}"
+          - "Parámetro EXTPROC_DLLS configurado: {{ cis_31_param_exists }}"
+          - "Valor actual: {{ cis_31_param_value }}"
+          - "Configurado como ONLY: {{ cis_31_is_only }}"
+          - "Estado de cumplimiento: {{ cis_31_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 31) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_31_needs_remediation: "{{ not cis_31_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 31) - Configurar EXTPROC_DLLS
+      when: cis_31_needs_remediation
+      block:
+        # Paso 8.0: Obtener grupo principal del usuario
+        - name: Obtener grupo principal del usuario
+          ansible.builtin.shell: |
+            set -o pipefail
+            id -gn
+          register: grp_princ
+          changed_when: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+
+        # Paso 8.1: Crear backup del archivo listener.ora si existe
+        - name: (Remediation - CIS 31) - Crear backup del archivo listener.ora
+          ansible.builtin.copy:
+            src: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            dest: "{{ hardening_oracle_home }}/network/admin/listener.ora.{{ ansible_date_time.date }}"
+            remote_src: true
+            owner: "{{ cis_31_listener_file.stat.pw_name }}"
+            group: "{{ cis_31_listener_file.stat.gr_name }}"
+            mode: "{{ cis_31_listener_file.stat.mode }}"
+          become: true
+          when: cis_31_listener_exists
+
+        # Paso 8.2: Crear el archivo listener.ora si no existe
+        - name: (Remediation - CIS 31) - Crear el archivo listener.ora si no existe
+          ansible.builtin.file:
+            path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            state: touch
+            owner: "{{ hardening_current_user }}"
+            group: "{{ grp_princ.stdout | trim }}"
+            mode: "0644"
+          become: true
+          when: not cis_31_listener_exists
+
+        # Paso 8.3: Configurar el parámetro en listener.ora
+        - name: (Remediation - CIS 31) - Configurar parámetro EXTPROC_DLLS
+          ansible.builtin.lineinfile:
+            path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            regexp: "^\\s*EXTPROC_DLLS\\s*="
+            line: "EXTPROC_DLLS=ONLY"
+            state: present
+            backup: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_31_parameter_config
+
+        # Paso 8.4: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 31) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_31_was_remediated: true
+            cis_31_compliant_final: true
+            cis_31_remediated_param_value: "ONLY"
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 31) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_31_was_remediated: false
+        cis_31_compliant_final: "{{ cis_31_compliant_initial }}"
+        cis_31_remediated_param_value: "{{ cis_31_param_value }}"
+      when: not cis_31_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 31 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_31] }}"
+      vars:
+        instance_result_cis_31:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_31:
+            parametro: "listener.ora - extproc_dlls"
+            description: "Si procedimientos externos son requeridos se debe limitar los llamados a DLLs o librerías dinámicas específicas."
+            implementacion: |
+              Configurar el siguiente parámetro:
+              EXTPROC_DLLS=ONLY
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo listener.ora y
+              verifique el parámetro indicado en la implementación.
+            commando: |
+              cd $ORACLE_HOME/network/admin
+              cat listener.ora | grep -i EXTPROC_DLLS
+            remediacion: |
+              Configurar en listener.ora:
+              EXTPROC_DLLS=ONLY
+            nota: >-
+              Este parámetro restringe la ejecución de procedimientos externos a solo
+              las librerías específicamente autorizadas.
+            type: "network"
+            listener_exists: "{{ cis_31_listener_exists }}"
+            param_exists: "{{ cis_31_param_exists }}"
+            param_value: "{{ cis_31_param_value }}"
+            is_only: "{{ cis_31_is_only }}"
+            remediated_param_value: "{{ cis_31_remediated_param_value }}"
+            compliant_initial: "{{ cis_31_compliant_initial }}"
+            compliant_final: "{{ cis_31_compliant_final }}"
+            was_remediated: "{{ cis_31_was_remediated }}"

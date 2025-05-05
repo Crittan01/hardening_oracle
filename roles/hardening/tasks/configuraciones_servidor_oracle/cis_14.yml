@@ -1,0 +1,150 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_14.yml
+---
+- name: CIS 14 - Verificación de inbound_connect_timeout_listener
+  block:
+    # Paso 1: Verificar la existencia del archivo listener.ora
+    - name: (Check - CIS 14) - Comprobar si existe el archivo listener.ora
+      ansible.builtin.stat:
+        path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+      register: cis_14_listener_file
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Paso 2: Verificar el valor actual de inbound_connect_timeout_listener
+    - name: (Check - CIS 14) - Leer el valor actual de inbound_connect_timeout_listener
+      ansible.builtin.shell: |
+        grep -i "inbound_connect_timeout_listener" {{ hardening_oracle_home }}/network/admin/listener.ora | grep -v "^#" | awk -F= '{print $2}' | tr -d ' '
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_14_timeout_result
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+      when: cis_14_listener_file.stat.exists
+
+    # Paso 3: Procesar el resultado y establecer banderas si el archivo existe
+    - name: (Check - CIS 14) - Procesar resultado
+      ansible.builtin.set_fact:
+        cis_14_file_exists: "{{ cis_14_listener_file.stat.exists }}"
+        cis_14_param_exists: "{{ cis_14_timeout_result.stdout | default('') | trim != '' }}"
+        cis_14_param_value: "{{ cis_14_timeout_result.stdout | default('') | trim }}"
+      when: cis_14_listener_file.stat.exists
+
+    # Paso 4: Establecer banderas si el archivo no existe
+    - name: (Check - CIS 14) - Establecer banderas si el archivo no existe
+      ansible.builtin.set_fact:
+        cis_14_file_exists: false
+        cis_14_param_exists: false
+        cis_14_param_value: ""
+      when: not cis_14_listener_file.stat.exists | default(false)
+
+    # Paso 5: Establecer el valor esperado y determinar cumplimiento
+    - name: (Check - CIS 14) - Establecer valor esperado y determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_14_expected_value: "2"
+        cis_14_compliant_initial: "{{ cis_14_file_exists and cis_14_param_exists and cis_14_param_value == '2' }}"
+
+    # Paso 6: Debug para mostrar la información detectada
+    - name: (Check - CIS 14) - Mostrar información detectada
+      ansible.builtin.debug:
+        msg:
+          - "Archivo listener.ora existe: {{ cis_14_file_exists }}"
+          - "Parámetro inbound_connect_timeout_listener existe: {{ cis_14_param_exists }}"
+          - "Valor actual: {{ cis_14_param_value }}"
+          - "Valor esperado: {{ cis_14_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_14_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 14) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_14_needs_remediation: "{{ not cis_14_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 14) - Configurar inbound_connect_timeout_listener
+      when: cis_14_needs_remediation
+      block:
+        # Paso 8.1: Crear una copia de seguridad del archivo listener.ora si existe
+        - name: (Remediation - CIS 14) - Crear copia de seguridad de listener.ora
+          ansible.builtin.copy:
+            src: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            dest: "{{ hardening_oracle_home }}/network/admin/listener.ora.{{ ansible_date_time.date }}"
+            remote_src: true
+            mode: "{{ cis_14_listener_file.stat.mode }}"
+            owner: "{{ cis_14_listener_file.stat.pw_name }}"
+            group: "{{ cis_14_listener_file.stat.gr_name }}"
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          when: cis_14_file_exists
+
+        # Paso 8.2: Crear el archivo listener.ora si no existe
+        - name: (Remediation - CIS 14) - Crear el archivo listener.ora si no existe
+          ansible.builtin.file:
+            path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            state: touch
+            owner: "{{ hardening_current_user }}"
+            group: "{{ hardening_oracle_grp }}"
+            mode: "0644"
+          become: true
+          become_user: root
+          when: not cis_14_file_exists
+
+        # Paso 8.3: Agregar o actualizar el parámetro en el archivo
+        - name: (Remediation - CIS 14) - Configurar parámetro inbound_connect_timeout_listener
+          ansible.builtin.lineinfile:
+            path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            regexp: "^\\s*inbound_connect_timeout_listener\\s*="
+            line: "inbound_connect_timeout_listener=2"
+            state: present
+            backup: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_14_remediation_result
+
+        # Paso 8.4: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 14) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_14_was_remediated: true
+            cis_14_compliant_final: true
+            cis_14_remediated_value: "{{ cis_14_expected_value }} (pendiente reinicio)"
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 14) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_14_was_remediated: false
+        cis_14_compliant_final: "{{ cis_14_compliant_initial }}"
+        cis_14_remediated_value: "{{ cis_14_param_value }}"
+      when: not cis_14_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 14 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_14] }}"
+      vars:
+        instance_result_cis_14:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_14:
+            parametro: "inbound_connect_timeout_listener"
+            description: >-
+              Establece el tiempo en segundos, en el cual el cliente debe realizar la solicitud de conexión al listener,
+              después de que la conexión de red ha sido establecida.
+            implementacion: |
+              En el archivo Listener.ora, configurar el siguiente parámetro:
+              inbound_connect_timeout_listener=2
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo listener.ora y verifique el parámetro indicado en la implementación.
+            commando: |
+              cd $ORACLE_HOME/network/admin
+              grep -i inbound_connect_timeout_listener listener.ora
+            nota: >-
+              La configuración de este valor en un nivel muy bajo puede ocasionar que los usuarios no se conecten a la base de datos.
+              Se debe aplicar el valor recomendado e ir aumentándolo hasta que opere correctamente.
+            type: "network"
+            file_exists: "{{ cis_14_file_exists }}"
+            param_exists: "{{ cis_14_param_exists }}"
+            param_value: "{{ cis_14_param_value }}"
+            expected_value: "{{ cis_14_expected_value }}"
+            remediated_value: "{{ cis_14_remediated_value | default(cis_14_param_value) }}"
+            compliant_initial: "{{ cis_14_compliant_initial }}"
+            compliant_final: "{{ cis_14_compliant_final }}"
+            was_remediated: "{{ cis_14_was_remediated }}"

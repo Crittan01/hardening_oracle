@@ -1,0 +1,95 @@
+# roles/hardening/tasks/autorizacion/cis_51.yml
+---
+- name: CIS 51 - Verificación de uso de WITH ADMIN
+  block:
+    # Paso 1: Ejecutar la consulta detallada proporcionada en el instructivo
+    - name: (Check - CIS 51) - Verificar asignación de privilegios WITH ADMIN
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select * from dba_role_privs where admin_option='YES' and grantee not in (select username from dba_users )
+        and grantee not in ('SYS','SYSTEM','DV_OWNER','DBA','PDB_DBA','RECOVERY_CATALOG_OWNER_VPD','DV_ACCTMGR');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_51_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 51) - Contar asignaciones de privilegios WITH ADMIN
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select * from dba_role_privs where admin_option='YES' and grantee not in (select username from dba_users )
+        and grantee not in ('SYS','SYSTEM','DV_OWNER','DBA','PDB_DBA','RECOVERY_CATALOG_OWNER_VPD','DV_ACCTMGR'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_51_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 51) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_51_count: "{{ cis_51_count_result.stdout | trim | int }}"
+        cis_51_detail_raw: "{{ cis_51_detail_result.stdout_lines | default([]) }}"
+        cis_51_expected_count: 0
+
+    # Paso 4: Determinar estado de conformidad
+    - name: (Check - CIS 51) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_51_compliant_initial: "{{ cis_51_count | int == 0 }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 51) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de roles/usuarios con WITH ADMIN: {{ cis_51_count }}"
+          - "Estado de conformidad: {{ cis_51_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 51) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_51_needs_remediation: "{{ not cis_51_compliant_initial }}"
+        cis_51_compliant_final: "{{ cis_51_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_51_was_remediated: false
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 51 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_51] }}"
+      vars:
+        instance_result_cis_51:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_51:
+            parametro: "WITH ADMIN"
+            description: "Restringir el uso de privilegios WITH ADMIN."
+            implementacion: |
+              Revisar los roles y usuarios que tengan asignados los privilegios "WITH ADMIN", y retirarlos si no son requeridos.
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM
+              select * from dba_role_privs where admin_option='YES' and grantee not in (select username from dba_users ) and grantee not in
+              ('SYS','SYSTEM','DV_OWNER','DBA','PDB_DBA','RECOVERY_CATALOG_OWNER_VPD','DV_ACCTMGR');
+            remediacion: |
+              Revocar los privilegios WITH ADMIN a los roles o usuarios no autorizados.
+              Ejemplo: REVOKE [role_name] FROM [grantee] [CASCADE];
+            nota: >-
+              Este control requiere remediación manual. El privilegio WITH ADMIN permite al grantee otorgar
+              a su vez el privilegio a otros usuarios, lo que aumenta el riesgo de escalación de privilegios.
+            type: "security"
+            expected_count: "{{ cis_51_expected_count }}"
+            actual_count: "{{ cis_51_count }}"
+            detail_raw: "{{ cis_51_detail_raw }}"
+            compliant_initial: "{{ cis_51_compliant_initial }}"
+            compliant_final: "{{ cis_51_compliant_final }}"
+            needs_remediation: "{{ cis_51_needs_remediation }}"
+            was_remediated: "{{ cis_51_was_remediated }}"

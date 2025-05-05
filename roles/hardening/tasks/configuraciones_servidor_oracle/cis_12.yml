@@ -1,0 +1,123 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_12.yml
+---
+- name: CIS 12 - Verificación de os_roles
+  block:
+    # Paso 1: Verificar el valor actual de os_roles
+    - name: (Check - CIS 12) - Verificar valor actual de os_roles
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='os_roles';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_12_os_roles_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 12) - Procesar valor de os_roles
+      ansible.builtin.set_fact:
+        cis_12_os_roles_value: "{{ cis_12_os_roles_result.stdout | trim | upper }}"
+
+    # Paso 3: Establecer el valor esperado (FALSE)
+    - name: (Check - CIS 12) - Establecer valor esperado
+      ansible.builtin.set_fact:
+        cis_12_expected_value: "FALSE"
+
+    # Paso 4: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 12) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_12_compliant_initial: "{{ cis_12_os_roles_value == cis_12_expected_value }}"
+
+    # Paso 5: Debug avanzado para ayudar a diagnosticar problemas
+    - name: (Check - CIS 12) - Debug de valores para comparación
+      ansible.builtin.debug:
+        msg:
+          - "Valor os_roles actual (texto): '{{ cis_12_os_roles_value }}'"
+          - "Valor esperado (texto): '{{ cis_12_expected_value }}'"
+          - "¿Son iguales?: {{ cis_12_os_roles_value == cis_12_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_12_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 12) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de os_roles: {{ cis_12_os_roles_value }}"
+          - "Valor esperado: {{ cis_12_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_12_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 12) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_12_needs_remediation: "{{ not cis_12_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 12) - Configurar os_roles
+      when: cis_12_needs_remediation
+      block:
+        # Paso 8.1: Aplicar la remediación
+        - name: (Remediation - CIS 12) - Configurar os_roles a FALSE
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET os_roles=FALSE SCOPE=SPFILE SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_12_remediation_result
+          changed_when: "'System altered' in cis_12_remediation_result.stdout"
+
+        # Paso 8.2: Verificar si se requiere reinicio
+        - name: (Remediation - CIS 12) - Indicar que se requiere reiniciar la instancia
+          ansible.builtin.debug:
+            msg: "Se ha modificado el parámetro os_roles. Para la instancia {{ hardening_current_instance }}."
+
+        # Paso 8.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 12) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_12_was_remediated: true
+            cis_12_compliant_final: true
+            cis_12_remediated_value: "{{ cis_12_expected_value }} (pendiente reinicio)"
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 12) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_12_was_remediated: false
+        cis_12_compliant_final: "{{ cis_12_compliant_initial }}"
+        cis_12_remediated_value: "{{ cis_12_os_roles_value }}"
+      when: not cis_12_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 12 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_12] }}"
+      vars:
+        instance_result_cis_12:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_12:
+            parametro: "os_roles"
+            description: "Los roles de Sistema Operativo son sujeto de control fuera de la base de datos."
+            implementacion: |
+              En el archivo init.ora, configurar el siguiente parámetro:
+              os_roles=false
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo init.ora y verifique el parámetro indicado en la implementación.
+            commando: |
+              select name, value, DECODE(Value,'FALSE','Cumple','Revisar') ESTADO from v$parameter where name='os_roles';
+            nota: Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto.
+            type: "security"
+            os_roles_value: "{{ cis_12_os_roles_value }}"
+            expected_value: "{{ cis_12_expected_value }}"
+            remediated_value: "{{ cis_12_remediated_value | default(cis_12_os_roles_value) }}"
+            compliant_initial: "{{ cis_12_compliant_initial }}"
+            compliant_final: "{{ cis_12_compliant_final }}"
+            was_remediated: "{{ cis_12_was_remediated }}"

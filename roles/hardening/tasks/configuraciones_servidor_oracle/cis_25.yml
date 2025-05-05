@@ -1,0 +1,129 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_25.yml
+---
+- name: CIS 25 - Verificación de sec_protocol_error_trace_action
+  block:
+    # Paso 1: Verificar el valor actual del parámetro
+    - name: (Check - CIS 25) - Verificar valor actual de sec_protocol_error_trace_action
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='sec_protocol_error_trace_action';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_25_param_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 25) - Procesar valor del parámetro
+      ansible.builtin.set_fact:
+        cis_25_param_value: "{{ cis_25_param_result.stdout | trim | upper }}"
+
+    # Paso 3: Establecer el valor esperado
+    - name: (Check - CIS 25) - Establecer valor esperado
+      ansible.builtin.set_fact:
+        cis_25_expected_value: "LOG"
+
+    # Paso 4: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 25) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_25_compliant_initial: "{{ cis_25_param_value == cis_25_expected_value }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 25) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de sec_protocol_error_trace_action: {{ cis_25_param_value }}"
+          - "Valor esperado: {{ cis_25_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_25_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Determinar si se requiere remediación
+    - name: (Check - CIS 25) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_25_needs_remediation: "{{ not cis_25_compliant_initial }}"
+
+    # Paso 7: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 25) - Configurar sec_protocol_error_trace_action
+      when: cis_25_needs_remediation
+      block:
+        # Paso 7.1: Aplicar la remediación
+        - name: (Remediation - CIS 25) - Configurar sec_protocol_error_trace_action con el valor correcto
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET sec_protocol_error_trace_action='LOG' SCOPE=BOTH SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_25_remediation_result
+          changed_when: "'System altered' in cis_25_remediation_result.stdout"
+
+        # Paso 7.2: Verificar el nuevo valor después de la remediación
+        - name: (Remediation - CIS 25) - Verificar valor actualizado de sec_protocol_error_trace_action
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            select value from v\$parameter where name='sec_protocol_error_trace_action';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_25_verify_result
+          changed_when: false
+
+        # Paso 7.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 25) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_25_was_remediated: true
+            cis_25_compliant_final: true
+            cis_25_remediated_value: "{{ cis_25_verify_result.stdout | trim | upper }}"
+
+    # Paso 8: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 25) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_25_was_remediated: false
+        cis_25_compliant_final: "{{ cis_25_compliant_initial }}"
+        cis_25_remediated_value: "{{ cis_25_param_value }}"
+      when: not cis_25_needs_remediation | bool
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 25 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_25] }}"
+      vars:
+        instance_result_cis_25:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_25:
+            parametro: "sec_protocol_error_trace_action"
+            description: "Especifica la acción que toma la base de datos cuando se recibe un paquete inválido."
+            implementacion: |
+              Configurar el siguiente parámetro:
+              SEC_PROTOCOL_ERROR_TRACE_ACTION=LOG
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo init.ora y
+              verifique el parámetro indicado en la implementación.
+            commando: |
+              SELECT name, value, DECODE(Value,'LOG','Cumple','Revisar') ESTADO
+              FROM v$parameter WHERE name='sec_protocol_error_trace_action';
+            remediacion: |
+              ALTER SYSTEM SET sec_protocol_error_trace_action='LOG' SCOPE=BOTH SID='*';
+            nota: >-
+              Se utiliza SCOPE=BOTH para que el cambio sea inmediato y también permanezca
+              después de un reinicio de la instancia.
+            type: "parameter"
+            param_value: "{{ cis_25_param_value }}"
+            expected_value: "{{ cis_25_expected_value }}"
+            remediated_value: "{{ cis_25_remediated_value }}"
+            compliant_initial: "{{ cis_25_compliant_initial }}"
+            compliant_final: "{{ cis_25_compliant_final }}"
+            was_remediated: "{{ cis_25_was_remediated }}"

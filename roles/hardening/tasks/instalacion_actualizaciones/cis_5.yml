@@ -1,0 +1,87 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_5.yml
+---
+- name: CIS 5 - Verificación de cuentas por defecto
+  block:
+    # Verificar cuentas predefinidas y su estado
+    - name: (Check - CIS 5) - Verificar estado de cuentas predefinidas
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select username || ',' || account_status || ',' ||
+          case when account_status like ('%LOCKED%') OR account_status like ('%EXPIRED%')
+          then 'CONFORME' else 'NO CONFORME' end ESTADO
+        from dba_users where username in ('ADAMS','ANONYMOUS','AURORA$JIS$UTILITY$','AURORA$ORBUNAUTHENTICATED',
+        'BLAKE', 'CLARK', 'CTXSYS', 'DBA','DIP','EXFSYS','IMP_FULL_DATABASE','JAVASYSPRIV','JONES','LBACSYS',
+        'MDSYS','MGMT_VIEW','MTSSYS','ODM','ODM_MTR','OE','OEM_MONITOR', 'OLAPDBA','OLAPSVR','OLAPSYS',
+        'ORACLE_OCM','ORDPLUGINS','ORDSYS','OSE$HTTP$ADMIN','OUTLN','PERFSTAT','QS','QS_ADM','QS_CB','QS_CBADM',
+        'QS_CS','QS_ES','QS_OS','QS_OSQS_WS','QS_WS','RDSYS','REPADMIN','SCOTT','SH','SI_INFORMTN_SCHEMA',
+        'SYSMAN','TRACESVR','TSMSYS','WKPROXY','WKSYS','WKUSER','WMSYS','XDB')
+        and account_status ='OPEN';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_5_accounts_status_result
+      changed_when: false
+
+    # Procesar el resultado para obtener la lista de cuentas predefinidas y su estado
+    - name: (Check - CIS 5) - Procesar estado de cuentas predefinidas
+      ansible.builtin.set_fact:
+        cis_5_accounts_status: "{{ cis_5_accounts_status | default([]) +
+          [{'username': item.split(',')[0] | trim,
+          'status': item.split(',')[1] | trim,
+          'cumplimiento': item.split(',')[2] | trim}] }}"
+      loop: "{{ cis_5_accounts_status_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+      when: cis_5_accounts_status_result.stdout_lines | length > 0
+
+    # Si no hay resultados, inicializar la lista vacía
+    - name: (Check - CIS 5) - Inicializar lista vacía si no hay resultados de cuentas
+      ansible.builtin.set_fact:
+        cis_5_accounts_status: []
+      when: cis_5_accounts_status_result.stdout_lines | length == 0 or cis_5_accounts_status is not defined
+
+    # Establecer estados de cumplimiento: Conforme si no hay cuentas, No Conforme si hay al menos una
+    - name: (Check - CIS 5) - Establecer estados de cumplimiento
+      ansible.builtin.set_fact:
+        cis_5_compliant_initial: "{{ (cis_5_accounts_status | default([]) | length) == 0 }}"
+        cis_5_compliant_final: "{{ (cis_5_accounts_status | default([]) | length) == 0 }}"
+        cis_5_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 5) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Usuarios predefinidos abiertos: {{ cis_5_accounts_status | length }}"
+          - "Estado de cumplimiento: {{ cis_5_compliant_initial }}"
+        verbosity: 0
+
+    # Añadir los resultados a la estructura global
+    - name: Agregar resultados de cuentas por defecto a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_5] }}"
+      vars:
+        instance_result_cis_5:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_5:
+            parametro: "Cuentas por defecto"
+            description: "Mantener bloqueadas y expiradas las cuentas por defecto, a menos que sean absolutamente necesarias."
+            implementacion: |
+              Bloquear y expirar las cuentas por defecto del sistema.
+              ALTER USER <username> identified by <paword_nuevo> ;
+            verificacion: >-
+              "Verificar el estado de las cuentas mediante la sentencia.
+            comando: |
+              select username, account_status, case when account_status like ('%LOCKED%') OR account_status like ('%EXPIRED%')then 'CUMPLE'
+              else 'REVISAR' end ESTADO from dba_users where username in('ADAMS','ANONYMOUS','AURORA$JIS$UTILITY$','AURORA$ORBUNAUTHENTICATED', 'BLAKE',
+              'CLARK', 'CTXSYS', 'DBA','DIP','EXFSYS','IMP_FULL_DATABASE','JAVASYSPRIV','JONES','LBACSYS','MDSYS','MGMT_VIEW','MTSSYS','ODM','ODM_MTR','OE',
+              'OEM_MONITOR', 'OLAPDBA','OLAPSVR','OLAPSYS','ORACLE_OCM','ORDPLUGINS','ORDSYS','OSE$HTTP$ADMIN','OUTLN','PERFSTAT','QS','QS_ADM','QS_CB',
+              'QS_CBADM','QS_CS','QS_ES','QS_OS','QS_OSQS_WS','QS_WS','RDSYS','REPADMIN','SCOTT','SH','SI_INFORMTN_SCHEMA','SYSMAN','TRACESVR','TSMSYS','WKPROXY',
+              'WKSYS','WKUSER','WMSYS','XDB') and account_status ='OPEN'  ;
+            type: "security"
+            accounts_status: "{{ cis_5_accounts_status }}"
+            accounts_count: "{{ cis_5_accounts_status | length }}"
+            compliant_initial: "{{ cis_5_compliant_initial }}"
+            compliant_final: "{{ cis_5_compliant_final }}"
+            was_remediated: false

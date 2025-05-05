@@ -1,0 +1,59 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_3.yml
+---
+- name: CIS 3 - Verificación de Password OS para el Listener
+  block:
+    - name: (Check - CIS 3) - Buscar configuración de PASSWORD en listener.ora
+      ansible.builtin.shell: >-
+        . ~/.bash_profile &&
+        grep -i PASSWORD {{ hardening_oracle_home }}/network/admin/listener.ora || echo "No encontrado"
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_3_query_result
+      changed_when: false
+
+    - name: (Check - CIS 3) - Determinar estado de la configuración
+      ansible.builtin.set_fact:
+        cis_3_password_found: "{{ 'No encontrado' not in cis_3_query_result.stdout }}"
+        cis_3_password_value: "{{ cis_3_query_result.stdout if 'No encontrado' not in cis_3_query_result.stdout else 'No configurado' }}"
+
+    - name: (Check - CIS 3) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Configuración de Password en listener.ora:"
+          - "Presente: {{ cis_3_password_found }}"
+          - "Valor: {{ cis_3_password_value }}"
+        verbosity: 1
+
+    # Para este control, la autenticación del OS es la opción por defecto
+    # Si no hay PASSWORD configurado, entonces se está usando la autenticación de OS
+    # Si hay PASSWORD configurado, se verifica si es seguro o por defecto
+    - name: (Check - CIS 3) - Establecer estado de conformidad
+      ansible.builtin.set_fact:
+        cis_3_compliant_initial: "{{ not cis_3_password_found }}"
+        cis_3_compliant_final: "{{ not cis_3_password_found }}"
+        cis_3_was_remediated: false
+
+    # Agregar los resultados de esta instancia a la lista global
+    - name: Check - CIS 3) - Agregar resultados de Autenticación del Servidor a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_3] }}"
+      vars:
+        instance_result_cis_3:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_3:
+            parametro: "Password de OS"
+            description: "Usar la autenticación del OS para acceder al listener"
+            implementacion: >-
+              La autenticación al OS se encuentra activa por defecto.
+              Si usuarios adicionales requieren acceso al Listener se debe asignar un password cifrado usando el comando Set password,
+              y la herramienta lsnrctl.
+            verificacion: >-
+              Verificar la configuración establecida con la ejecución del siguiente comando
+            commando: grep -i PASSWORD $ORACLE_HOME/network/admin/listener.ora;
+            nota: Puede generar afectacion de servicio no conocer la clave en el momento de un reinicio del servicio de listener
+            type: "verification"
+            password_found: "{{ cis_3_password_found }}"
+            password_value: "{{ cis_3_password_value }}"
+            compliant_initial: "{{ cis_3_compliant_initial }}"
+            compliant_final: "{{ cis_3_compliant_final }}"
+            was_remediated: "{{ cis_3_was_remediated }}"

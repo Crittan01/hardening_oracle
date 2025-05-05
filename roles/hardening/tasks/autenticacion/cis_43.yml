@@ -1,0 +1,136 @@
+# roles/hardening/tasks/autenticacion/cis_43.yml
+---
+- name: CIS 43 - Verificación de Tiempo de gracia de la contraseña
+  block:
+    # Paso 1: Ejecutar la consulta proporcionada en el instructivo
+    - name: (Check - CIS 43) - Verificar configuración de PASSWORD_GRACE_TIME
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT profile || ',' || resource_name || ',' || limit
+        FROM dba_profiles
+        WHERE resource_name='PASSWORD_GRACE_TIME';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_43_check_result
+      changed_when: false
+
+    # Paso 2: Procesar los resultados de la consulta
+    - name: (Check - CIS 43) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_43_all_profiles_raw: "{{ cis_43_check_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+        cis_43_expected_value: "0"
+
+    # Paso 3: Inicializar variables para evitar errores
+    - name: (Check - CIS 43) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_43_all_profiles: []
+        cis_43_default_found: false
+        cis_43_default_profile: {}
+
+    # Paso 4: Estructurar datos de todos los perfiles
+    - name: (Check - CIS 43) - Estructurar datos de todos los perfiles
+      ansible.builtin.set_fact:
+        cis_43_all_profiles: "{{ cis_43_all_profiles | default([]) +
+          [{'profile': profile_item.split(',')[0] | trim,
+          'resource': profile_item.split(',')[1] | trim,
+          'limit': profile_item.split(',')[2] | trim}] }}"
+      loop: "{{ cis_43_all_profiles_raw }}"
+      loop_control:
+        loop_var: profile_item
+      when: cis_43_all_profiles_raw | length > 0
+
+    # Paso 5: Buscar específicamente el perfil DEFAULT
+    - name: (Check - CIS 43) - Verificar perfil DEFAULT
+      ansible.builtin.set_fact:
+        cis_43_default_found: "{{ (cis_43_all_profiles | selectattr('profile', 'equalto', 'DEFAULT') | list | length) > 0 }}"
+        cis_43_default_profile: "{{ cis_43_all_profiles | selectattr('profile', 'equalto', 'DEFAULT') | first | default({}) }}"
+      when: cis_43_all_profiles | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 43) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_43_compliant_initial: "{{ cis_43_default_found and cis_43_default_profile.limit == '0' }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 43) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "¿Perfil DEFAULT encontrado?: {{ cis_43_default_found }}"
+          - "Valor actual en DEFAULT: {{ cis_43_default_profile.limit | default('No encontrado') }}"
+          - "Estado de conformidad: {{ cis_43_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: Determinar si se requiere remediación
+    - name: (Check - CIS 43) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_43_needs_remediation: "{{ not cis_43_compliant_initial }}"
+
+    # Paso 9: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 43) - Configurar tiempo de gracia de la contraseña
+      when: cis_43_needs_remediation
+      block:
+        # Paso 9.1: Remediar perfil DEFAULT
+        - name: (Remediation - CIS 43) - Configurar PASSWORD_GRACE_TIME en perfil DEFAULT
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER PROFILE DEFAULT LIMIT PASSWORD_GRACE_TIME 0;
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_43_default_remediation
+          changed_when: "'Profile altered' in cis_43_default_remediation.stdout"
+
+        # Paso 9.2: Establecer estado después de la remediación
+        - name: (Remediation - CIS 43) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_43_compliant_final: true
+            cis_43_was_remediated: true
+            cis_43_requires_restart: false
+
+    # Paso 10: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 43) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_43_compliant_final: "{{ cis_43_compliant_initial }}"
+        cis_43_was_remediated: false
+        cis_43_requires_restart: false
+      when: not cis_43_needs_remediation | bool
+
+    # Paso 11: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 43 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_43] }}"
+      vars:
+        instance_result_cis_43:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_43:
+            parametro: "Tiempo de gracia de la contraseña"
+            description: "Tiempo de gracia de uso de la contraseña después de que esta se ha vencido."
+            implementacion: |
+              Para configurar en el profile Default, ejecute la siguiente sentencia:
+              Alter profile DEFAULT limit PASSWORD_GRACE_TIME 0;
+            verificacion: >-
+              Para verificar el estado del parámetro PASSWORD_GRACE_TIME, ejecute la siguiente sentencia:
+              select profile, resource_name, limit from dba_profiles where resource_name='PASSWORD_GRACE_TIME';
+            remediacion: |
+              ALTER PROFILE DEFAULT LIMIT PASSWORD_GRACE_TIME 0;
+            nota: >-
+              Configurar PASSWORD_GRACE_TIME en 0 impide que los usuarios puedan conectarse con una contraseña caducada,
+              obligándolos a cambiarla inmediatamente.
+            type: "security"
+            expected_value: "{{ cis_43_expected_value }}"
+            default_found: "{{ cis_43_default_found }}"
+            default_profile: "{{ cis_43_default_profile }}"
+            requires_restart: "{{ cis_43_requires_restart | default(false) }}"
+            compliant_initial: "{{ cis_43_compliant_initial }}"
+            compliant_final: "{{ cis_43_compliant_final }}"
+            was_remediated: "{{ cis_43_was_remediated }}"

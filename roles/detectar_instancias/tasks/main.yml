@@ -1,0 +1,58 @@
+# roles/detectar_instancias/tasks/main.yml
+---
+# Detectar instancias Oracle con su usuario y ruta correspondiente
+- name: Detectar instancias Oracle, usuarios y rutas
+  ansible.builtin.shell: |
+    ps -eo user,cmd --no-headers | grep '[o]ra_pmon' | while read user cmd; do
+      sid="${cmd##*_}"
+      ruta=$(awk -F: -v sid="$sid" '$1 == sid {print $2}' /etc/oratab 2>/dev/null)
+      [ -z "$ruta" ] && ruta="no tiene ruta"
+      echo "$user,$sid,$ruta"
+    done
+  register: oracle_instances_result
+  changed_when: false
+  ignore_errors: true
+  tags: always
+
+# Inicializar variables
+- name: Inicializar estructuras de datos para instancias
+  ansible.builtin.set_fact:
+    oracle_instances: []
+    oracle_instances_info: {}
+  tags: always
+
+# Procesar resultados para obtener instancias y datos asociados
+- name: Procesar datos de instancias Oracle
+  ansible.builtin.set_fact:
+    oracle_instances: "{{ oracle_instances + [instance_sid] }}"
+    oracle_instances_info: >-
+      {{ oracle_instances_info | combine({
+          instance_sid: {
+            'sid': instance_sid,
+            'user': instance_user,
+            'home': instance_home,
+            'base': (instance_home | regex_replace('/product/.*$', '')) if instance_home != 'no tiene ruta' else 'desconocido'
+          }
+      }) }}
+  vars:
+    instance_parts: "{{ item.split(',') }}"
+    instance_user: "{{ instance_parts[0] | trim }}"
+    instance_sid: "{{ instance_parts[1] | trim }}"
+    instance_home: "{{ instance_parts[2] | trim }}"
+  loop: "{{ oracle_instances_result.stdout_lines }}"
+  when: item | trim != ""
+  tags: always
+
+# Verificar si hay instancias detectadas
+- name: Verificar si hay instancias Oracle en ejecución
+  ansible.builtin.set_fact:
+    oracle_instances_found: "{{ oracle_instances | length > 0 }}"
+  tags: always
+
+# Mostrar resultados
+- name: Mostrar instancias detectadas
+  ansible.builtin.debug:
+    msg:
+      - "Instancias Oracle detectadas: {{ oracle_instances if oracle_instances_found else 'Ninguna' }}"
+      - "Información detallada: {{ oracle_instances_info | to_nice_yaml }}"
+  tags: always

@@ -1,0 +1,28 @@
+---
+# vars file for roles/hardening
+
+# Usuario y grupo Oracle
+# hardening_oracle_usr: "{{ oracle_owner | default('oracle') }}"
+# hardening_oracle_grp: "{{ oracle_group | default('oinstall') }}"
+
+# Rutas de Oracle (obtenidas dinámicamente del playbook principal)
+# hardening_oracle_base: "{{ oracle_base }}"
+# hardening_oracle_home: "{{ oracle_home }}"
+# Parámetros de configuración CIS por control
+
+# Configurar salida set sqlplus
+hardening_set_sqlplus: |
+  SET PAGESIZE 0
+  SET FEEDBACK OFF
+  SET VERIFY OFF
+  SET HEADING OFF
+  SET LINESIZE 1000
+  SET ECHO OFF
+
+# SET COLSEP ',': Ajusta el separador de columnas a coma
+# SET PAGESIZE 0: Elimina los saltos de página y encabezados repetidos
+# SET FEEDBACK OFF: Suprime los mensajes como "n rows selected"
+# SET VERIFY OFF: Evita que se muestren los comandos antes de ejecutarlos
+# SET HEADING OFF: Elimina los encabezados de columna
+# SET LINESIZE 1000: Establece el ancho máximo de línea a 1000 caracteres
+# SET ECHO OFF: No muestra los comandos mientras se ejecutan

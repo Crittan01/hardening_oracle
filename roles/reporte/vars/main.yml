@@ -1,0 +1,10 @@
+---
+# vars file for roles/reporte
+
+# Usuario y grupo Oracle
+reporte_oracle_usr: "{{ oracle_owner | default('oracle') }}"
+reporte_oracle_grp: "{{ oracle_group | default('oinstall') }}"
+
+# Rutas de Oracle (obtenidas dinámicamente del playbook principal)
+reporte_oracle_base: "{{ oracle_base }}"
+reporte_oracle_home: "{{ oracle_home }}"

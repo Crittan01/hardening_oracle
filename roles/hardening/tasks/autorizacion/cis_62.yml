@@ -1,0 +1,158 @@
+---
+- name: CIS 62 - Verificación de permisos en archivos .ora
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 62) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_62_valid_pattern: "^ora[a-zA-Z0-9]{3,4}$"
+        cis_62_invalid_users: ["oracle"]
+        cis_62_explict_valid_users: ["grid"] # Usuarios válidos
+        cis_62_valid_groups: ["dba", "oinstall", "asmdba"]
+        cis_62_instance_user_valid: "{{
+          hardening_current_user is match('^ora[a-zA-Z0-9]{3,4}$') and
+          hardening_current_user != 'oracle' or
+          hardening_current_user in ['grid'] }}"
+        cis_62_file_details: []
+        cis_62_compliant_files: []
+        cis_62_non_compliant_files: []
+        cis_62_target_files: []
+
+    # Buscar archivos específicos para esta instancia
+    - name: (Check - CIS 62) - Identificar archivos específicos para esta instancia
+      ansible.builtin.find:
+        paths: "{{ hardening_oracle_home }}/dbs"
+        patterns:
+          - "init{{ hardening_current_instance }}.ora"
+          - "spfile{{ hardening_current_instance }}.ora"
+        file_type: file
+      register: cis_62_instance_ora_files
+      become: true
+
+    # Si no se encuentran archivos específicos, buscar todos los init*.ora y spfile*.ora
+    - name: (Check - CIS 62) - Buscar archivos .ora generales si no hay específicos
+      ansible.builtin.find:
+        paths: "{{ hardening_oracle_home }}/dbs"
+        patterns:
+          - "init*.ora"
+          - "spfile*.ora"
+        file_type: file
+      register: cis_62_all_ora_files
+      become: true
+      when: cis_62_instance_ora_files.files | length == 0
+
+    # Determinar qué conjunto de archivos usar
+    - name: (Check - CIS 62) - Decidir qué archivos evaluar
+      ansible.builtin.set_fact:
+        cis_62_target_files: "{{
+          cis_62_instance_ora_files.files if cis_62_instance_ora_files.files | length > 0
+          else cis_62_all_ora_files.files | default([]) }}"
+
+    # Verificar archivos
+    - name: (Check - CIS 62) - Verificar archivos
+      ansible.builtin.stat:
+        path: "{{ file_path.path }}"
+        get_attributes: true
+      register: cis_62_stat_results
+      loop: "{{ cis_62_target_files }}"
+      loop_control:
+        loop_var: file_path
+      become: true
+      when: cis_62_target_files | length > 0
+
+    # Procesar resultados
+    - name: (Check - CIS 62) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_62_file_details: "{{ cis_62_file_details + [file_detail] }}"
+        cis_62_compliant_files: "{{ cis_62_compliant_files + [file_item.stat.path] if file_compliant else cis_62_compliant_files }}"
+        cis_62_non_compliant_files: "{{ cis_62_non_compliant_files + [file_detail] if not file_compliant else cis_62_non_compliant_files }}"
+      vars:
+        # Definir criterios de validación
+        valid_owner: "{{ file_item.stat.exists and file_item.stat.pw_name == hardening_current_user }}"
+        valid_naming: "{{
+          file_item.stat.exists and
+          (file_item.stat.pw_name is match(cis_62_valid_pattern) and file_item.stat.pw_name not in cis_62_invalid_users) or
+          file_item.stat.pw_name in cis_62_explict_valid_users }}"
+        valid_group: "{{ file_item.stat.exists and file_item.stat.gr_name in cis_62_valid_groups }}"
+        valid_permission: "{{
+          file_item.stat.exists and
+          (file_item.stat.mode | regex_replace('^0', '') | int(base=8) <= 0o660) }}"
+        # Determinar cumplimiento general
+        file_compliant: "{{ file_item.stat.exists and valid_owner and valid_naming and valid_group and valid_permission }}"
+        # Crear objeto con detalles
+        file_detail:
+          {
+            "path": "{{ file_item.stat.path }}",
+            "exists": "{{ file_item.stat.exists }}",
+            "owner": "{{ file_item.stat.pw_name if file_item.stat.exists else 'N/A' }}",
+            "group": "{{ file_item.stat.gr_name if file_item.stat.exists else 'N/A' }}",
+            "mode": "{{ file_item.stat.mode if file_item.stat.exists else 'N/A' }}",
+            "owner_valid": "{{ valid_owner }}",
+            "naming_valid": "{{ valid_naming }}",
+            "group_valid": "{{ valid_group }}",
+            "permission_valid": "{{ valid_permission }}",
+            "compliant": "{{ file_compliant }}",
+          }
+      loop: "{{ cis_62_stat_results.results | default([]) }}"
+      loop_control:
+        loop_var: file_item
+      when: cis_62_stat_results is defined
+
+    # Determinar estado general
+    - name: (Check - CIS 62) - Establecer estado general
+      ansible.builtin.set_fact:
+        cis_62_total_count: "{{ cis_62_file_details | length }}"
+        cis_62_valid_count: "{{ cis_62_compliant_files | length }}"
+        cis_62_invalid_count: "{{ cis_62_non_compliant_files | length }}"
+        cis_62_compliant_initial: "{{ cis_62_non_compliant_files | length == 0 and cis_62_file_details | length > 0 }}"
+        cis_62_compliant_final: "{{ cis_62_non_compliant_files | length == 0 and cis_62_file_details | length > 0 }}"
+        cis_62_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 62) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Instancia: {{ hardening_current_instance }}"
+          - "Total de archivos analizados: {{ cis_62_total_count }}"
+          - "Archivos conformes: {{ cis_62_valid_count }}"
+          - "Archivos no conformes: {{ cis_62_invalid_count }}"
+          - "Estado de cumplimiento: {{ cis_62_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_62] }}"
+      vars:
+        instance_result_cis_62:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_62:
+            parametro: "Permisos en archivos .ora"
+            description: "Verifique y limite los permisos de los parámetros de inicio"
+            implementacion: |
+              Los archivos init*.ora y spfile*.ora deben pertenecer al usuario que ejecuta la
+              instancia. Este usuario debe seguir la convención 'ora' + 3-4 caracteres (ej: ora19c)
+              o ser el usuario 'grid' (para instancias ASM). Los archivos deben pertenecer a un
+              grupo válido (dba, oinstall, asmdba) y sus permisos deben ser 0660 o más restrictivos.
+            verificacion: >-
+              Verificar los propietarios y permisos de los archivos init*.ora y spfile*.ora
+              específicos para la instancia.
+            objetivo: >-
+              Asegurar que los archivos de parámetros de inicio tengan permisos restrictivos y
+              pertenezcan al usuario correcto, protegiendo la configuración de la base de datos.
+            commando: |
+              ls -la $ORACLE_HOME/dbs/init{{ hardening_current_instance }}.ora $ORACLE_HOME/dbs/spfile{{ hardening_current_instance }}.ora
+            nota: "Los permisos 0660 significan rw-rw---- (propietario: rw-, grupo: rw-, otros: ---)"
+            type: "filesystem"
+            archivos_evaluados: "{{ cis_62_file_details | map(attribute='path') | list }}"
+            file_details: "{{ cis_62_file_details }}"
+            instance_user: "{{ hardening_current_user }}"
+            instance_user_valid: "{{ cis_62_instance_user_valid }}"
+            valid_pattern: "{{ cis_62_valid_pattern }}"
+            explicit_valid_users: "{{ cis_62_explict_valid_users }}"
+            valid_groups: "{{ cis_62_valid_groups }}"
+            total_count: "{{ cis_62_total_count }}"
+            valid_count: "{{ cis_62_valid_count }}"
+            invalid_count: "{{ cis_62_invalid_count }}"
+            compliant_initial: "{{ cis_62_compliant_initial }}"
+            compliant_final: "{{ cis_62_compliant_final }}"
+            was_remediated: false

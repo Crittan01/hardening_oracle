@@ -1,0 +1,162 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_17.yml
+---
+- name: CIS 17 - Verificación de Funciones de Verificación de Contraseñas
+  block:
+    # Paso 1: Verificar las funciones de verificación de contraseñas en los perfiles
+    - name: (Check - CIS 17) - Consultar funciones de verificación de contraseñas en perfiles
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT profile || ',' || resource_name || ',' || limit
+        FROM dba_profiles
+        WHERE resource_name LIKE 'PASSWORD_VERIFY_FUNCTION%';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_17_verify_functions_result
+      changed_when: false
+
+    # Paso 2: Contar cuántas funciones de verificación están configuradas
+    - name: (Check - CIS 17) - Contar funciones de verificación configuradas
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT COUNT(*)
+        FROM dba_profiles
+        WHERE resource_name LIKE 'PASSWORD_VERIFY_FUNCTION%';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_17_count_result
+      changed_when: false
+
+    # Paso 3: Procesar los resultados de la consulta de funciones
+    - name: (Check - CIS 17) - Procesar resultados de funciones de verificación
+      ansible.builtin.set_fact:
+        cis_17_verify_functions: "{{ cis_17_verify_functions | default([]) + [function_info] }}"
+      vars:
+        function_parts: "{{ function_line.split(',') }}"
+        function_info:
+          profile: "{{ function_parts[0] | trim }}"
+          resource_name: "{{ function_parts[1] | trim }}"
+          limit: "{{ function_parts[2] | trim }}"
+      loop: "{{ cis_17_verify_functions_result.stdout_lines | select('match', '.*,.*,.*') | list }}"
+      loop_control:
+        loop_var: function_line
+      when: cis_17_verify_functions_result.stdout_lines | length > 0
+
+    # Paso 4: Inicializar lista vacía si no hay resultados
+    - name: (Check - CIS 17) - Inicializar lista vacía si no hay funciones configuradas
+      ansible.builtin.set_fact:
+        cis_17_verify_functions: []
+      when: cis_17_verify_functions_result.stdout_lines | length == 0 or cis_17_verify_functions is not defined
+
+    # Paso 5: Obtener usuarios con perfiles que no tienen función de verificación
+    - name: (Check - CIS 17) - Consultar usuarios con perfiles sin función de verificación
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT username || ',' || account_status || ',' || profile
+        FROM dba_users
+        WHERE profile IN (
+          SELECT profile
+          FROM dba_profiles
+          WHERE limit IS NULL
+          AND resource_name LIKE 'PASSWORD_VERIFY_FUNCTION%'
+        )
+        ORDER BY username;
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_17_users_result
+      changed_when: false
+
+    # Paso 6: Procesar los resultados de usuarios sin función de verificación
+    - name: (Check - CIS 17) - Procesar usuarios sin función de verificación
+      ansible.builtin.set_fact:
+        cis_17_users_without_verification: "{{ cis_17_users_without_verification | default([]) + [user_info] }}"
+      vars:
+        user_parts: "{{ user_line.split(',') }}"
+        user_info:
+          username: "{{ user_parts[0] | trim }}"
+          account_status: "{{ user_parts[1] | trim }}"
+          profile: "{{ user_parts[2] | trim }}"
+      loop: "{{ cis_17_users_result.stdout_lines | select('match', '.*,.*,.*') | list }}"
+      loop_control:
+        loop_var: user_line
+      when: cis_17_users_result.stdout_lines | length > 0
+
+    # Paso 7: Inicializar lista vacía si no hay usuarios sin función de verificación
+    - name: (Check - CIS 17) - Inicializar lista vacía si no hay usuarios sin función
+      ansible.builtin.set_fact:
+        cis_17_users_without_verification: []
+      when: cis_17_users_result.stdout_lines | length == 0 or cis_17_users_without_verification is not defined
+
+    # Paso 8: Determinar cumplimiento basado en el recuento de funciones
+    - name: (Check - CIS 17) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_17_functions_count: "{{ cis_17_count_result.stdout | trim | int }}"
+        cis_17_compliant_initial: "{{ cis_17_count_result.stdout | trim | int > 0 }}"
+        cis_17_compliant_final: "{{ cis_17_count_result.stdout | trim | int > 0 }}"
+        cis_17_was_remediated: false
+
+    # Paso 9: Mostrar resultados para depuración
+    - name: (Check - CIS 17) - Mostrar resultados de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Funciones de verificación de contraseñas encontradas: {{ cis_17_functions_count }}"
+          - "Cumplimiento: {{ cis_17_compliant_initial }}"
+          - "Usuarios con perfiles sin función de verificación: {{ cis_17_users_without_verification | length }}"
+        verbosity: 0
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 17 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_17] }}"
+      vars:
+        instance_result_cis_17:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_17:
+            parametro: "Cuentas de Usuarios"
+            description: "Proteger el acceso a las cuentas propietarias de los esquemas de aplicación."
+            implementacion: |
+              Las contraseñas de las cuentas propietarias de objetos en la base de datos deben ser asignadas de acuerdo
+              con la política de manejo de contraseñas establecida.
+              Los cambios sobre los objetos en la base de datos deben ser realizados por un DBA y ser consistentes
+              con un control de cambios autorizado.
+            verificacion: >-
+              Verificar que las contraseñas son asignadas y protegidas de acuerdo con la política establecida.
+            commando: |
+              <br>
+              - SELECT profile, resource_name, limit
+              FROM dba_profiles
+              WHERE resource_name LIKE ('PASSWORD_VERIFY_FUNCTION%');<br>
+
+              - SELECT COUNT(*)
+              FROM dba_profiles
+              WHERE resource_name LIKE ('PASSWORD_VERIFY_FUNCTION%');<br>
+
+              - SELECT DECODE(valor,'0','Revisar','Cumple') estado
+              FROM (SELECT COUNT(*) valor
+                    FROM (SELECT profile, resource_name, limit
+                          FROM dba_profiles
+                          WHERE resource_name LIKE ('PASSWORD_VERIFY_FUNCTION%')));
+            nota: >-
+              Este control requiere revisión manual de acuerdo a las políticas organizacionales.
+              La remediación debe ser aplicada manualmente por un DBA siguiendo el proceso establecido.
+            type: "security"
+            functions: "{{ cis_17_verify_functions }}"
+            functions_count: "{{ cis_17_functions_count }}"
+            users_without_verification: "{{ cis_17_users_without_verification }}"
+            compliant_initial: "{{ cis_17_compliant_initial }}"
+            compliant_final: "{{ cis_17_compliant_final }}"
+            was_remediated: "{{ cis_17_was_remediated }}"

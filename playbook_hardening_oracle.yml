@@ -1,0 +1,133 @@
+---
+- name: Hardening de Oracle 19c CIS Benchmark por Instancia
+  hosts: oracle_servers
+  gather_facts: false
+  vars:
+    oracle_owner: oracle
+    oracle_group: oinstall
+    instances_results: [] # Variable para almacenar los resultados de todas las instancias
+
+  pre_tasks:
+    - name: (PRE) - Recolectar Facts
+      ansible.builtin.setup:
+      delegate_to: server_ansible
+      tags: always
+
+  tasks:
+    - name: Incluir Role Detectar Instancias
+      ansible.builtin.include_role:
+        name: detectar_instancias
+        apply:
+          tags: always
+      tags: always
+
+    # Mostrar mensaje cuando no hay instancias
+    - name: Mostrar mensaje cuando no hay instancias Oracle en ejecución
+      ansible.builtin.debug:
+        msg: "No se detectaron instancias Oracle en ejecución en este servidor. No se aplicarán controles de hardening."
+      when: not oracle_instances_found | default(false) | bool
+      tags: always
+
+    # Procesar cada instancia individualmente (sólo si hay instancias)
+    - name: Incluir Role Hardening para cada instancia
+      ansible.builtin.include_role:
+        name: hardening
+        apply:
+          tags: all
+      vars:
+        hardening_current_instance: "{{ item }}"
+        hardening_current_user: "{{ oracle_instances_info[item].user }}"
+        hardening_oracle_home: "{{ oracle_instances_info[item].home if oracle_instances_info[item].home != 'no tiene ruta' else omit }}"
+        hardening_oracle_base: "{{ oracle_instances_info[item].base if oracle_instances_info[item].base != 'desconocido' else omit }}"
+        hardening_oracle_sid: "{{ item }}"
+      loop: "{{ oracle_instances | default([]) }}"
+      loop_control:
+        label: "{{ item }} (usuario: {{ oracle_instances_info[item].user }})"
+      when: oracle_instances_found | default(false) | bool
+      tags:
+        [
+          cis_1,
+          cis_2,
+          cis_3,
+          cis_4,
+          cis_5,
+          cis_6,
+          cis_sn,
+          cis_7,
+          cis_8,
+          cis_9,
+          cis_10,
+          cis_11,
+          cis_12,
+          cis_13,
+          cis_14,
+          cis_15,
+          cis_16,
+          cis_17,
+          cis_18,
+          cis_19,
+          cis_20,
+          cis_21,
+          cis_22,
+          cis_23,
+          cis_24,
+          cis_25,
+          cis_26,
+          cis_27,
+          cis_28,
+          cis_29,
+          cis_30,
+          cis_31,
+          cis_32,
+          cis_33,
+          cis_34,
+          cis_35,
+          cis_36,
+          cis_37,
+          cis_38,
+          cis_39,
+          cis_40,
+          cis_41,
+          cis_42,
+          cis_43,
+          cis_44,
+          cis_45,
+          cis_46,
+          cis_47,
+          cis_48,
+          cis_49,
+#          cis_50,
+          cis_51,
+          cis_52,
+          cis_53,
+          cis_54,
+          cis_55,
+          cis_56,
+          cis_57,
+          cis_58,
+          cis_59,
+          cis_60,
+          cis_61,
+          cis_62,
+          cis_65,
+          cis_66,
+          cis_67,
+          cis_68,
+          cis_69,
+          cis_70
+        ]
+
+    # Generar el reporte (condicional)
+    - name: Incluir Role Reporte
+      ansible.builtin.include_role:
+        name: reporte
+        apply:
+          tags: always
+      vars:
+        reporte_all_instances: "{{ oracle_instances | default([]) }}"
+        reporte_instances_info: "{{ oracle_instances_info | default({}) }}"
+        reporte_instances_data: "{{ instances_results | default([]) }}"
+        reporte_hardening_oracle_usr: "{{ oracle_owner | default('oracle') }}"
+        reporte_hardening_oracle_grp: "{{ oracle_group | default('oinstall') }}"
+      when: oracle_instances_found | default(false) | bool
+      tags: always

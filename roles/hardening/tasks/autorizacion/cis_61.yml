@@ -1,0 +1,60 @@
+# roles/hardening/tasks/seguridad_archivos/cis_61.yml
+---
+- name: CIS 61 - Verificación de umask 022 en el usuario Oracle
+  block:
+    # Paso 1: Verificar umask actual del usuario Oracle
+    - name: (Check - CIS 61) - Verificar umask actual del usuario Oracle
+      ansible.builtin.shell: |
+        . ~/.bash_profile 2>/dev/null || . ~/.bashrc 2>/dev/null || . ~/.profile 2>/dev/null || true
+        umask
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_61_current_umask
+      changed_when: false
+
+    # Paso 2: Determinar conformidad
+    - name: (Check - CIS 61) - Determinar conformidad
+      ansible.builtin.set_fact:
+        cis_61_umask_value: "{{ cis_61_current_umask.stdout | trim }}"
+        cis_61_umask_correct: "{{ cis_61_current_umask.stdout | trim in ['022', '0022'] }}"
+        cis_61_compliant_initial: "{{ cis_61_current_umask.stdout | trim in ['022', '0022'] }}"
+        cis_61_compliant_final: "{{ cis_61_current_umask.stdout | trim in ['022', '0022'] }}"
+        cis_61_was_remediated: false
+
+    # Paso 3: Mostrar resultados
+    - name: (Check - CIS 61) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de umask: {{ cis_61_umask_value }}"
+          - "¿Valor de umask correcto?: {{ cis_61_umask_correct }}"
+          - "Estado de cumplimiento: {{ cis_61_compliant_initial }}"
+        verbosity: 1
+
+    # Paso 4: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 61 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_61] }}"
+      vars:
+        instance_result_cis_61:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_61:
+            parametro: "Archivo .profile de Oracle en UNIX"
+            description: "En sistemas Unix umask 022"
+            implementacion: |
+              Configure el valor de umask es 022 para el propietario del software Oracle antes de instalar Oracle.
+            verificacion: >-
+              El valor de umask es 022 para el propietario del software Oracle antes de instalar Oracle.
+            explicacion: >-
+              * El valor umask 022 significa:
+                 * El propietario tiene permisos completos (lectura, escritura, ejecución)
+                 * Grupo y otros tienen permisos de lectura y ejecución
+              * Este valor permite crear archivos con permisos predeterminados de 644 (rw-r--r--)
+              * Es importante configurarlo antes de la instalación de Oracle para establecer los permisos correctos desde el inicio
+            commando: |
+              umask
+            type: "configuration"
+            umask_value: "{{ cis_61_umask_value }}"
+            umask_correct: "{{ cis_61_umask_correct }}"
+            compliant_initial: "{{ cis_61_compliant_initial }}"
+            compliant_final: "{{ cis_61_compliant_final }}"
+            was_remediated: "{{ cis_61_was_remediated }}"

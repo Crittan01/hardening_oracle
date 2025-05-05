@@ -1,0 +1,118 @@
+# roles/hardening/tasks/autorizacion/cis_53.yml
+---
+- name: Verificacion permisos DBMS_EXPORT_EXTENSION
+  block:
+    # Paso 1: Ejecutar la consulta detallada acorde al instructivo
+    - name: (Check - CIS 57) - Verificar permisos DBMS_EXPORT_EXTENSION
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select GRANTEE || ',' || PRIVILEGE || ',' || type from dba_tab_privs where grantee ='DBMS_EXPORT_EXTENSION' and grantee not in ('SYS' ,'SYSTEM'
+        ,'SYSBACKUP' ,'SYSDG','AUDSYS','SYSKM', 'SYSRAC','OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER','GSMROOTUSER','DIP','XS$NULL', 'REMOTE_SCHEDULER_AGENT',
+        'DBSFWUSER','ORACLE_OCM','SYS$UMF','DBSNMP','APPQOSSYS','GSMCATUSER','GGSYS','XDB','ANONYMOUS','WMSYS','OJVMSYS','CTXSYS','ORDSYS','SI_INFORMTN_SCHEMA',
+        'MDSYS','ORDPLUGINS','ORDDATA','OLAPSYS','MDDATA','DVSYS','DVF');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_57_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 57) - Conteo permisos DBMS_EXPORT_EXTENSION
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) valor from (select GRANTEE || ',' || PRIVILEGE || ',' || type from dba_tab_privs where grantee ='DBMS_EXPORT_EXTENSION'
+        and grantee not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG','AUDSYS','SYSKM', 'SYSRAC','OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER','GSMROOTUSER','DIP',
+        'XS$NULL','REMOTE_SCHEDULER_AGENT','DBSFWUSER','ORACLE_OCM','SYS$UMF','DBSNMP','APPQOSSYS','GSMCATUSER','GGSYS','XDB','ANONYMOUS','WMSYS','OJVMSYS',
+        'CTXSYS','ORDSYS','SI_INFORMTN_SCHEMA','MDSYS','ORDPLUGINS','ORDDATA','OLAPSYS','MDDATA','DVSYS','DVF'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_57_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar resultados
+    - name: (Check - CIS 57) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_57_count: "{{ cis_57_count_result.stdout | trim | int }}"
+        cis_57_detail_raw: "{{ cis_57_detail_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+        cis_57_expected_count: 0
+
+    # Paso 4: Estructurar datos de privilegios encontrados
+    - name: (Check - CIS 57) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_57_sensitive_privileges: []
+
+    # Paso 5: Estructurar datos de privilegios encontrados si existen
+    - name: (Check - CIS 57) - Estructurar datos en lista de dicts
+      ansible.builtin.set_fact:
+        cis_57_sensitive_privileges:
+          "{{ cis_57_sensitive_privileges | default([]) +
+          [{'grantee': priv_item.split(',')[0] | trim,
+          'granted_role': priv_item.split(',')[1] | trim,
+          'type': priv_item.split(',')[2] | trim}] }}"
+      loop: "{{ cis_57_detail_raw }}"
+      loop_control:
+        loop_var: priv_item
+      when: cis_57_detail_raw | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 57) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_57_compliant_initial: "{{ cis_57_count | int == 0 }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 57) - Mostrar resultados de Verificacion
+      ansible.builtin.debug:
+        msg:
+          - "Numero de privilegios DBMS_EXPORT_EXTENSION: {{ cis_57_count }}"
+          - "Privilegios encontrados: {{ cis_57_sensitive_privileges | length }}"
+          - "Estado de conformidad: {{ cis_57_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 57) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_57_needs_remediation: "{{ not cis_57_compliant_initial }}"
+        cis_57_compliant_final: "{{ cis_57_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_57_was_remediated: false
+
+    # Paso 9: Agregar resultados a lista global
+    - name: Agregar resultados de CIS 57 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_57] }}"
+      vars:
+        instance_result_cis_57:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_57:
+            parametro: "DBMS_EXPORT_EXTENSION"
+            description: Restringir la asignación de DBMS_EXPORT_EXTENSION
+            implementacion: |
+              Revisar los usuarios con privilegios "DBMS_EXPORT_EXTENSION" y restringirlos tanto como sea posible
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM.
+              <br> select * from dba_tab_privs where privilege ='DBMS_EXPORT_EXTENSION' and grantee not in
+              ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG', 'AUDSYS','SYSKM', 'SYSRAC','OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER','GSMROOTUSER','DIP','XS$NULL',
+              'REMOTE_SCHEDULER_AGENT','DBSFWUSER','ORACLE_OCM','SYS$UMF','DBSNMP','APPQOSSYS','GSMCATUSER','GGSYS','XDB','ANONYMOUS','WMSYS','OJVMSYS',
+              'CTXSYS','ORDSYS','SI_INFORMTN_SCHEMA','MDSYS','ORDPLUGINS','ORDDATA','OLAPSYS','MDDATA','DVSYS','DVF');
+            remediacion: |
+              Revisar los usuarios con privilegios “DBMS_EXPORT_EXTENSION” y restringirlos tanto como sea posible.
+            nota: >-
+              Este control requiere remediación manual.
+            type: "security"
+            expected_count: "{{ cis_57_expected_count }}"
+            actual_count: "{{ cis_57_count }}"
+            sensitive_privileges: "{{ cis_57_sensitive_privileges }}"
+            compliant_initial: "{{ cis_57_compliant_initial }}"
+            compliant_final: "{{ cis_57_compliant_final }}"
+            needs_remediation: "{{ cis_57_needs_remediation }}"
+            was_remediated: "{{ cis_57_was_remediated }}"

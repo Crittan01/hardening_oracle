@@ -1,0 +1,133 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_21.yml
+---
+- name: CIS 21 - Verificación de db_securefile
+  block:
+    # Paso 1: Verificar el valor actual del parámetro
+    - name: (Check - CIS 21) - Verificar valor actual de db_securefile
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='db_securefile';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_21_param_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 21) - Procesar valor del parámetro
+      ansible.builtin.set_fact:
+        cis_21_param_value: "{{ cis_21_param_result.stdout | trim | upper }}"
+
+    # Paso 3: Establecer el valor esperado
+    - name: (Check - CIS 21) - Establecer valor esperado
+      ansible.builtin.set_fact:
+        cis_21_expected_value: "ALWAYS"
+
+    # Paso 4: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 21) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_21_compliant_initial: "{{ cis_21_param_value == cis_21_expected_value }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 21) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de db_securefile: {{ cis_21_param_value }}"
+          - "Valor esperado: {{ cis_21_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_21_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Determinar si se requiere remediación
+    - name: (Check - CIS 21) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_21_needs_remediation: "{{ not cis_21_compliant_initial }}"
+
+    # Paso 7: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 21) - Configurar db_securefile
+      when: cis_21_needs_remediation
+      block:
+        # Paso 7.1: Aplicar la remediación
+        - name: (Remediation - CIS 21) - Configurar db_securefile con el valor correcto
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET db_securefile='ALWAYS' SCOPE=BOTH SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_21_remediation_result
+          changed_when: "'System altered' in cis_21_remediation_result.stdout"
+
+        # Paso 7.2: Verificar el nuevo valor después de la remediación
+        - name: (Remediation - CIS 21) - Verificar valor actualizado de db_securefile
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            select value from v\$parameter where name='db_securefile';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_21_verify_result
+          changed_when: false
+
+        # Paso 7.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 21) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_21_was_remediated: true
+            cis_21_compliant_final: true
+            cis_21_remediated_value: "{{ cis_21_verify_result.stdout | trim | upper }}"
+
+    # Paso 8: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 21) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_21_was_remediated: false
+        cis_21_compliant_final: "{{ cis_21_compliant_initial }}"
+        cis_21_remediated_value: "{{ cis_21_param_value }}"
+      when: not cis_21_needs_remediation | bool
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 21 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_21] }}"
+      vars:
+        instance_result_cis_21:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_21:
+            parametro: "db_securefile"
+            description: >-
+              Asegura que todos los archivos LOB (Oracle large object) son creados como
+              archivos seguros en el tablespaces ASSM, los archivos LOB que no se encuentren
+              en este tablespace son creados como archivos BasicFiles.
+            implementacion: |
+              Configurar el siguiente parámetro:
+              DB_SECUREFILE=ALWAYS
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo init.ora y
+              verifique el parámetro indicado en la implementación.
+            commando: |
+              SELECT name, value FROM v$parameter WHERE name='db_securefile';
+              SELECT name, value, DECODE(Value,'ALWAYS','Cumple','Revisar') ESTADO
+              FROM v$parameter WHERE name='db_securefile';
+            remediacion: |
+              ALTER SYSTEM SET db_securefile='ALWAYS' SCOPE=BOTH SID='*';
+            nota: >-
+              Se utiliza SCOPE=BOTH para que el cambio sea inmediato y también permanezca
+              después de un reinicio de la instancia.
+            type: "parameter"
+            param_value: "{{ cis_21_param_value }}"
+            expected_value: "{{ cis_21_expected_value }}"
+            remediated_value: "{{ cis_21_remediated_value | default(cis_21_param_value) }}"
+            compliant_initial: "{{ cis_21_compliant_initial }}"
+            compliant_final: "{{ cis_21_compliant_final }}"
+            was_remediated: "{{ cis_21_was_remediated }}"

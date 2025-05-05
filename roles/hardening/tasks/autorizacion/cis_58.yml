@@ -1,0 +1,103 @@
+# roles/hardening/tasks/seguridad_archivos/cis_58.yml
+---
+- name: CIS 58 - Verificación de propietario de archivos en $ORACLE_HOME/bin
+  block:
+    # Paso 1: Obtener la lista de archivos en el directorio bin
+    - name: (Check - CIS 58) - Obtener lista de archivos en $ORACLE_HOME/bin
+      ansible.builtin.find:
+        paths: "{{ hardening_oracle_home }}/bin"
+        file_type: file
+      register: cis_58_bin_files
+      become: true
+
+    # Paso 2: Inicializar listas para recopilar resultados
+    - name: (Check - CIS 58) - Inicializar variables para recopilar resultados
+      ansible.builtin.set_fact:
+        cis_58_valid_files: []
+        cis_58_invalid_files: []
+        cis_58_owners_summary: {}
+
+    # Paso 3: Verificar propietario de cada archivo usando stat
+    - name: (Check - CIS 58) - Verificar propietario de cada archivo
+      ansible.builtin.stat:
+        path: "{{ file_stat.path }}"
+        get_attributes: true
+      register: cis_58_file_stats
+      loop: "{{ cis_58_bin_files.files }}"
+      loop_control:
+        loop_var: file_stat
+      become: true
+
+    # Paso 4: Procesar resultados y clasificar archivos por propietario
+    - name: (Check - CIS 58) - Procesar resultados de stat
+      ansible.builtin.set_fact:
+        # Un propietario es válido si NO es 'oracle' y sigue el patrón ora + 3-4 caracteres
+        cis_58_valid_files: >-
+          {{ cis_58_valid_files + [file_stat.stat.path]
+             if (file_stat.stat.pw_name != 'oracle' and (file_stat.stat.pw_name is regex('^ora[0-9a-z]{2,4}$')))
+             else cis_58_valid_files }}
+        # Un propietario es inválido si ES 'oracle' o NO sigue el patrón
+        cis_58_invalid_files: >-
+          {{ cis_58_invalid_files + [{'path': file_stat.stat.path, 'owner': file_stat.stat.pw_name}]
+             if (file_stat.stat.pw_name == 'oracle' or not (file_stat.stat.pw_name is regex('^ora[0-9a-z]{2,4}$')))
+             else cis_58_invalid_files }}
+        # Actualizar el contador para cada propietario único
+        cis_58_owners_summary: >-
+          {{ cis_58_owners_summary | combine({file_stat.stat.pw_name: (cis_58_owners_summary[file_stat.stat.pw_name] | default(0)) + 1}) }}
+      loop: "{{ cis_58_file_stats.results }}"
+      loop_control:
+        loop_var: file_stat
+
+    # Paso 5: Procesar y mostrar resultados claramente
+    - name: (Check - CIS 58) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_58_invalid_count: "{{ cis_58_invalid_files | length }}"
+        cis_58_valid_count: "{{ cis_58_valid_files | length }}"
+        cis_58_total_count: "{{ cis_58_bin_files.files | length }}"
+        cis_58_compliant_initial: "{{ cis_58_invalid_files | length == 0 }}"
+        cis_58_compliant_final: "{{ cis_58_invalid_files | length == 0 }}"
+        cis_58_was_remediated: false
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 58) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Total de archivos analizados: {{ cis_58_total_count }}"
+          - "Archivos con propietario válido: {{ cis_58_valid_count }}"
+          - "Archivos con propietario inválido: {{ cis_58_invalid_count }}"
+          - "Resumen de propietarios: {{ cis_58_owners_summary }}"
+          - "Propietarios válidos deben seguir el patrón: 'ora' + 3-4 caracteres (ej: ora19c)"
+          - "Propietario 'oracle' es considerado INVÁLIDO según las premisas"
+          - "Estado de cumplimiento: {{ cis_58_compliant_initial }}"
+
+# Paso 7: Agregar los resultados a la lista global
+- name: Agregar resultados de CIS 58 a la lista global
+  ansible.builtin.set_fact:
+    instances_results: "{{ instances_results | default([]) + [instance_result_cis_58] }}"
+  vars:
+    instance_result_cis_58:
+      instance_name: "{{ hardening_current_instance }}"
+      cis_58:
+        parametro: "Archivos en $ORACLE_HOME/bin"
+        description: "Verifique y configure propietario"
+        implementacion: |
+          Todos los archivos en $ORACLE_HOME/bin deben ser propiedad de la cuenta de software Oracle.
+          El nombre del propietario debe seguir el patrón 'ora' + versión (3 o 4 caracteres), por ejemplo: ora19c, ora12c, ora21c, etc.
+        verificacion: >-
+          Todos los archivos en $ORACLE_HOME/bin deben ser propiedad de la cuenta de software Oracle.
+        objetivo: >-
+          Confirmar que los archivos en el directorio $ORACLE_HOME/bin tienen el propietario correcto, específicamente la cuenta de software Oracle
+        premisa: >-
+          <br> - Los archivos NO deben contener el propietario explícito 'oracle'.
+          <br> - La estructura debe ser explícito los primeros 3 dígitos con 'ora' + 3 o 4 dígitos.
+        commando: |
+          ls -la $ORACLE_HOME/bin
+        type: "filesystem"
+        total_count: "{{ cis_58_total_count }}"
+        valid_count: "{{ cis_58_valid_count }}"
+        owners_summary: "{{ cis_58_owners_summary }}"
+        invalid_files: "{{ cis_58_invalid_files }}"
+        invalid_count: "{{ cis_58_invalid_count }}"
+        compliant_initial: "{{ cis_58_compliant_initial }}"
+        compliant_final: "{{ cis_58_compliant_final }}"
+        was_remediated: "{{ cis_58_was_remediated }}"

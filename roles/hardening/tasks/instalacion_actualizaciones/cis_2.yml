@@ -1,0 +1,93 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_2.yml
+---
+- name: CIS 2 - Verificación de componentes instalados
+  block:
+    - name: (Check - CIS 2) - Ejecutar consulta de componentes instalados en formato CSV
+      ansible.builtin.shell:
+        cmd: |
+          . ~/.bash_profile
+          export ORACLE_SID={{ hardening_current_instance }}
+          sqlplus -s / as sysdba << EOF
+          {{ hardening_set_sqlplus }}
+          SELECT comp_name || ',' || version || ',' || status FROM dba_registry ORDER BY comp_name;
+          EXIT;
+          EOF
+        executable: /bin/bash
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_2_query_result
+      changed_when: false
+
+    - name: DEBUG - (Check - CIS 2) - Ejecutar consulta de componentes instalados en formato CSV
+      ansible.builtin.debug:
+        var: cis_2_query_result
+
+    # Inicializar la lista de componentes estructurados
+    - name: (Check - CIS 2) - Inicializar lista de componentes
+      ansible.builtin.set_fact:
+        cis_2_components_structured: []
+
+    # Procesar cada componente de la salida
+    - name: (Check - CIS 2) - Procesar componentes instalados en formato CSV
+      ansible.builtin.set_fact:
+        cis_2_components_structured: "{{ cis_2_components_structured | default([]) + [component_info] }}"
+      vars:
+        component_parts: "{{ comp_var.split(',') }}"
+        component_info:
+          name: "{{ component_parts[0] | trim }}"
+          version: "{{ component_parts[1] | trim }}"
+          status: "{{ component_parts[2] | trim }}"
+      loop: "{{ cis_2_query_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+      loop_control:
+        loop_var: comp_var
+      register: proc_csv
+
+    - name: DEBUG - (Check - CIS 2) - Procesar componentes instalados en formato CSV
+      ansible.builtin.debug:
+        var: proc_csv
+
+    # Verificar si algún componente tiene estado INVALID
+    - name: (Check - CIS 2) - Verificar estado de los componentes
+      ansible.builtin.set_fact:
+        cis_2_invalid_components: "{{ cis_2_components_structured | selectattr('status', 'eq', 'INVALID') | list }}"
+        cis_2_has_invalid_components: "{{ (cis_2_components_structured | selectattr('status', 'eq', 'INVALID') | list | length) > 0 }}"
+
+    # Establecer el estado de conformidad: Conforme si no hay componentes INVALID, No Conforme si hay al menos uno
+    - name: (Check - CIS 2) - Establecer estado de conformidad inicial
+      ansible.builtin.set_fact:
+        cis_2_compliant_initial: "{{ not cis_2_has_invalid_components }}"
+        cis_2_compliant_final: "{{ not cis_2_has_invalid_components }}"
+        cis_2_was_remediated: false
+
+    # Mostrar resultado de la verificación
+    - name: (Check - CIS 2) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Total de componentes: {{ cis_2_components_structured | length }}"
+          - "Componentes con estado INVALID: {{ cis_2_invalid_components | length }}"
+          - "¿Tiene componentes INVALID?: {{ cis_2_has_invalid_components }}"
+          - "Estado de conformidad: {{ cis_2_compliant_initial }}"
+        verbosity: 0
+
+    # Agregar los resultados de esta instancia a la lista global
+    - name: Agregar resultados de Oracle Updates a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_2] }}"
+      vars:
+        instance_result_cis_2:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_2:
+            parametro: "Instalación mínima"
+            description: "Asegurar que únicamente los componentes necesarios para el entorno de operación son instalados."
+            implementacion: >-
+              Durante la instalación, remueva los componentes que no son necesarios para la operación del servidor.
+            verificacion: >-
+              Verificar que los componentes instalados se estén utilizando por necesidades funcionales y que ninguno tenga estado INVALID.
+            commando: select comp_name, version, status from dba_registry;
+            type: "security"
+            components: "{{ cis_2_components_structured }}"
+            invalid_components: "{{ cis_2_invalid_components }}"
+            has_invalid_components: "{{ cis_2_has_invalid_components }}"
+            compliant_initial: "{{ cis_2_compliant_initial }}"
+            compliant_final: "{{ cis_2_compliant_final }}"
+            was_remediated: "{{ cis_2_was_remediated }}"

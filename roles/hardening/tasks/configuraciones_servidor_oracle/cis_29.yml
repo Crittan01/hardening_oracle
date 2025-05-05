@@ -1,0 +1,167 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_29.yml
+---
+- name: CIS 29 - Verificación de SECURE_REGISTER_listener_name
+  block:
+    # Paso 1: Verificar la existencia del archivo listener.ora
+    - name: (Check - CIS 29) - Comprobar si existe el archivo listener.ora
+      ansible.builtin.stat:
+        path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+      register: cis_29_listener_file
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Paso 2: Obtener el nombre del listener (asumimos "LISTENER" por defecto)
+    - name: (Check - CIS 29) - Establecer nombre del listener
+      ansible.builtin.set_fact:
+        cis_29_listener_name: "LISTENER"
+
+    # Paso 3: Verificar el valor actual del parámetro en listener.ora si existe
+    - name: (Check - CIS 29) - Verificar valor actual de SECURE_REGISTER_{{ cis_29_listener_name }}
+      ansible.builtin.shell: >-
+        . ~/.bash_profile && grep -i "SECURE_REGISTER_{{ cis_29_listener_name }}" {{ hardening_oracle_home }}/network/admin/listener.ora || echo "No encontrado"
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_29_grep_result
+      changed_when: false
+      when: cis_29_listener_file.stat.exists
+
+    # Paso 4: Procesar los resultados
+    - name: (Check - CIS 29) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_29_listener_exists: "{{ cis_29_listener_file.stat.exists | default(false) }}"
+        cis_29_param_exists:
+          "{{ 'No encontrado' not in cis_29_grep_result.stdout | default('No encontrado')
+          if cis_29_listener_file.stat.exists | default(false) else false }}"
+        cis_29_param_value:
+          "{{ cis_29_grep_result.stdout.split('=')[1] | trim if 'No encontrado' not in cis_29_grep_result.stdout | default('No encontrado')
+          and cis_29_listener_file.stat.exists | default(false) else 'No configurado' }}"
+
+    # Paso 5: Verificar si el parámetro contiene los protocolos seguros (TCP,IPC)
+    - name: (Check - CIS 29) - Verificar si contiene protocolos seguros
+      ansible.builtin.set_fact:
+        cis_29_contains_tcp: "{{ 'TCP' in cis_29_param_value | default('') | upper }}"
+        cis_29_contains_ipc: "{{ 'IPC' in cis_29_param_value | default('') | upper }}"
+
+    # Paso 6: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 29) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_29_compliant_initial: "{{ cis_29_param_exists and cis_29_contains_tcp and cis_29_contains_ipc }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 29) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Archivo listener.ora existe: {{ cis_29_listener_exists }}"
+          - "Nombre del listener: {{ cis_29_listener_name }}"
+          - "Parámetro SECURE_REGISTER_{{ cis_29_listener_name }} configurado: {{ cis_29_param_exists }}"
+          - "Valor actual: {{ cis_29_param_value }}"
+          - "Contiene TCP: {{ cis_29_contains_tcp }}"
+          - "Contiene IPC: {{ cis_29_contains_ipc }}"
+          - "Estado de cumplimiento: {{ cis_29_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: Determinar si se requiere remediación
+    - name: (Check - CIS 29) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_29_needs_remediation: "{{ not cis_29_compliant_initial }}"
+
+    # Paso 9: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 29) - Configurar SECURE_REGISTER_{{ cis_29_listener_name }}
+      when: cis_29_needs_remediation
+      block:
+        # Paso 8.0: Obtener grupo principal del usuario
+        - name: Obtener grupo principal del usuario
+          ansible.builtin.shell: |
+            set -o pipefail
+            id -gn
+          register: grp_princ
+          changed_when: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+
+        # Paso 9.1: Crear backup del archivo listener.ora si existe
+        - name: (Remediation - CIS 29) - Crear backup del archivo listener.ora
+          ansible.builtin.copy:
+            src: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            dest: "{{ hardening_oracle_home }}/network/admin/listener.ora.{{ ansible_date_time.date }}"
+            remote_src: true
+            owner: "{{ hardening_current_user }}"
+            group: "{{ grp_princ.stdout | trim }}"
+            mode: "0644"
+          become: true
+          when: cis_29_listener_exists
+
+        # Paso 9.2: Crear el archivo listener.ora si no existe
+        - name: (Remediation - CIS 29) - Crear el archivo listener.ora si no existe
+          ansible.builtin.file:
+            path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            state: touch
+            owner: "{{ hardening_current_user }}"
+            group: "{{ grp_princ.stdout | trim }}"
+            mode: "0644"
+          become: true
+          when: not cis_29_listener_exists
+
+        # Paso 9.3: Configurar el parámetro en listener.ora
+        - name: (Remediation - CIS 29) - Configurar parámetro SECURE_REGISTER_{{ cis_29_listener_name }}
+          ansible.builtin.lineinfile:
+            path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+            regexp: "^\\s*SECURE_REGISTER_{{ cis_29_listener_name }}\\s*="
+            line: "SECURE_REGISTER_{{ cis_29_listener_name }}=(TCP,IPC)"
+            state: present
+            backup: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_29_parameter_config
+
+        # Paso 9.4: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 29) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_29_was_remediated: true
+            cis_29_compliant_final: true
+            cis_29_remediated_param_value: "(TCP,IPC)"
+
+    # Paso 10: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 29) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_29_was_remediated: false
+        cis_29_compliant_final: "{{ cis_29_compliant_initial }}"
+        cis_29_remediated_param_value: "{{ cis_29_param_value }}"
+      when: not cis_29_needs_remediation | bool
+
+    # Paso 11: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 29 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_29] }}"
+      vars:
+        instance_result_cis_29:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_29:
+            parametro: "listener.ora - secure_register_listener_name"
+            description: "Asegura que se aceptan solicitudes de registro solo sobre conexiones seguras."
+            implementacion: |
+              Configurar el siguiente parámetro:
+              SECURE_REGISTER_listener_name=(TCP,IPC)
+            verificacion: >-
+              Verificar la configuración establecida abriendo el archivo listener.ora y
+              verifique el parámetro indicado en la implementación.
+            commando: |
+              cd $ORACLE_HOME/network/admin
+              cat listener.ora | grep -i SECURE_REGISTER_LISTENER
+            remediacion: |
+              Configurar en listener.ora:
+              SECURE_REGISTER_LISTENER=(TCP,IPC)
+            nota: >-
+              Este parámetro asegura que las solicitudes de registro del listener
+              solo sean aceptadas a través de los protocolos seguros especificados (TCP,IPC).
+            type: "network"
+            listener_exists: "{{ cis_29_listener_exists }}"
+            listener_name: "{{ cis_29_listener_name }}"
+            param_exists: "{{ cis_29_param_exists }}"
+            param_value: "{{ cis_29_param_value }}"
+            contains_tcp: "{{ cis_29_contains_tcp }}"
+            contains_ipc: "{{ cis_29_contains_ipc }}"
+            remediated_param_value: "{{ cis_29_remediated_param_value }}"
+            compliant_initial: "{{ cis_29_compliant_initial }}"
+            compliant_final: "{{ cis_29_compliant_final }}"
+            was_remediated: "{{ cis_29_was_remediated }}"

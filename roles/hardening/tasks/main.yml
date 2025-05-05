@@ -1,0 +1,827 @@
+# roles/hardening/tasks/main.yml
+---
+- name: Mostrar instancia actual a procesar
+  ansible.builtin.debug:
+    msg: "Procesando hardening para instancia: {{ hardening_current_instance | upper }} (Usuario: {{ hardening_current_user }})"
+  tags: always
+
+# Inicializar variables con valores por defecto vacíos para evitar errores
+- name: Inicializar variables de entorno Oracle
+  ansible.builtin.set_fact:
+    oracle_home_env_result: {}
+    oracle_base_env_result: {}
+  tags: always
+
+# Mecanismo de respaldo para ORACLE_HOME
+- name: Obtener ORACLE_HOME desde entorno si no se pudo obtener de oratab
+  ansible.builtin.shell: . ~/.bash_profile && echo $ORACLE_HOME
+  become: true
+  become_user: "{{ hardening_current_user }}"
+  register: oracle_home_env_result
+  changed_when: false
+  when: hardening_oracle_home is not defined or hardening_oracle_home == ""
+  tags: always
+
+# Mecanismo de respaldo para ORACLE_BASE
+- name: Obtener ORACLE_BASE desde entorno si no se pudo obtener de oratab
+  ansible.builtin.shell: . ~/.bash_profile && echo $ORACLE_BASE
+  become: true
+  become_user: "{{ hardening_current_user }}"
+  register: oracle_base_env_result
+  changed_when: false
+  when: hardening_oracle_base is not defined or hardening_oracle_base == ""
+  tags: always
+
+# Debug para entender mejor los valores actuales
+- name: DEBUG - Verificar valores de variables Oracle
+  ansible.builtin.debug:
+    msg:
+      - "hardening_oracle_home definida: {{ hardening_oracle_home is defined }}"
+      - "hardening_oracle_base definida: {{ hardening_oracle_base is defined }}"
+      - "oracle_home_env_result.stdout definida: {{ oracle_home_env_result.stdout is defined }}"
+      - "oracle_base_env_result.stdout definida: {{ oracle_base_env_result.stdout is defined }}"
+  tags: always
+
+# Establecer valores finales con verificación segura
+- name: Configurar variables Oracle finales
+  ansible.builtin.set_fact:
+    hardening_oracle_home: >-
+      {{ hardening_oracle_home | default(
+         oracle_home_env_result.stdout | default('') | trim if oracle_home_env_result.stdout is defined
+         else '/u01/app/oracle/product/19.0.0/dbhome_1'
+      ) }}
+    hardening_oracle_base: >-
+      {{ hardening_oracle_base | default(
+         oracle_base_env_result.stdout | default('') | trim if oracle_base_env_result.stdout is defined
+         else '/u01/app/oracle'
+      ) }}
+    hardening_oracle_sid: "{{ hardening_current_instance }}"
+  tags: always
+
+# Verificar configuración final
+- name: Verificar variables Oracle finales
+  ansible.builtin.debug:
+    msg:
+      - "ORACLE_HOME final: {{ hardening_oracle_home }}"
+      - "ORACLE_BASE final: {{ hardening_oracle_base }}"
+      - "ORACLE_SID final: {{ hardening_oracle_sid }}"
+  tags: always
+
+- name: Extraer versiones
+  ansible.builtin.set_fact:
+    oracle_version_full: "{{ oracle_version_result.stdout_lines[0] | default('Oracle Database') }}"
+  tags: always
+# ---------------- CONTROLES CIS ---------------- #
+#
+# CIS 1.1 -  Instalación y actualizaciones
+
+- name: Incluir CIS 1 - Versiones y Parches
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_1.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_1
+  tags:
+    - instalacion_actualizaciones
+    - cis_1
+
+- name: Incluir CIS 2 - Instalación mínima
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_2.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_2
+  tags:
+    - instalacion_actualizaciones
+    - cis_2
+
+- name: Incluir CIS 3 - Password OS para Listener
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_3.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_3
+  tags:
+    - instalacion_actualizaciones
+    - cis_3
+
+- name: Incluir CIS 4 - Nombre de SID o Servicio
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_4.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_4
+  tags:
+    - instalacion_actualizaciones
+    - cis_4
+
+- name: Incluir CIS 5 - Cuentas por defecto.
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_5.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_5
+  tags:
+    - instalacion_actualizaciones
+    - cis_5
+
+- name: Incluir CIS 6 - Objetos OEM
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_6.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_6
+  tags:
+    - instalacion_actualizaciones
+    - cis_6
+
+- name: Incluir CIS SN - Cuenta ORACLE
+  ansible.builtin.include_tasks:
+    file: instalacion_actualizaciones/cis_sn.yml
+    apply:
+      tags:
+        - instalacion_actualizaciones
+        - cis_sn
+  tags:
+    - instalacion_actualizaciones
+    - cis_sn
+
+# CIS 1.2 -  Configuraciones del servidor Oracle
+- name: Incluir CIS 7 - global_names
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_7.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_7
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_7
+
+- name: Incluir CIS 8 - remote_os_authent
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_8.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_8
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_8
+
+- name: Incluir CIS 9 - remote_os_roles
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_9.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_9
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_9
+
+- name: Incluir CIS 10 - remote_listener
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_10.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_10
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_10
+
+- name: Incluir CIS 11 - os_authent_prefix
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_11.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_11
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_11
+
+- name: Incluir CIS 12 - os_roles
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_12.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_12
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_12
+
+- name: Incluir CIS 13 - dispatchers
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_13.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_13
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_13
+
+- name: Incluir CIS 14 - inbound_connect_timeout_listener
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_14.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_14
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_14
+
+- name: Incluir CIS 15 - sqlnet.inbound_connect_timeout
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_15.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_15
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_15
+
+- name: Incluir CIS 16 - sqlnet.expire_time
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_16.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_16
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_16
+
+- name: Incluir CIS 17 - Cuentas de Usuarios
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_17.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_17
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_17
+
+- name: Incluir CIS 18 - Cuentas de Usuarios
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_18.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_18
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_18
+
+- name: Incluir CIS 19 - Listener.ora, tnsnames.ora
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_19.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_19
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_19
+
+- name: Incluir CIS 20 - sec_return_server_release_banner
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_20.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_20
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_20
+
+- name: Incluir CIS 21 - db_securefile
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_21.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_21
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_21
+
+- name: Incluir CIS 22 - sec_case_sensitive_logon
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_22.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_22
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_22
+
+- name: Incluir CIS 23 - sec_max_failed_login_attempts
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_23.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_23
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_23
+
+- name: Incluir CIS 24 - sec_protocol_error_further_action
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_24.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_24
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_24
+
+- name: Incluir CIS 25 - sec_protocol_error_trace_action
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_25.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_25
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_25
+
+- name: Incluir CIS 26 - sqlnet.ora - sec_user_audit_action_banner
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_26.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_26
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_26
+
+- name: Incluir CIS 27 - sqlnet.ora - sec_user_unauthorized_access_banner
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_27.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_27
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_27
+
+- name: Incluir CIS 28 - listener.ora - secure_protocol_listener_name
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_28.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_28
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_28
+
+- name: Incluir CIS 29 - listener.ora - secure_register_listener_name
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_29.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_29
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_29
+
+- name: Incluir CIS 30 - listener.ora - dynamic_registration_listener_name
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_30.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_30
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_30
+
+- name: Incluir CIS 31 - listener.ora - extproc_dlls
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_31.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_31
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_31
+
+- name: Incluir CIS 32 - listener.ora - TRACE_LEVEL_CLIENT
+  ansible.builtin.include_tasks:
+    file: configuraciones_servidor_oracle/cis_32.yml
+    apply:
+      tags:
+        - configuraciones_servidor_oracle
+        - cis_32
+  tags:
+    - configuraciones_servidor_oracle
+    - cis_32
+
+# CIS 1.3 - Autenticación
+- name: Incluir CIS 33 - Cambiar clave por defecto
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_33.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_33
+  tags:
+    - autenticacion
+    - cis_33
+
+- name: Incluir CIS 34 - Crear usuarios locales con mínimos privilegios
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_34.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_34
+  tags:
+    - autenticacion
+    - cis_34
+
+- name: Incluir CIS 35 - Complejidad de Contraseña
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_35.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_35
+  tags:
+    - autenticacion
+    - cis_35
+
+- name: Incluir CIS 36 - Intentos fallidos de conexión
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_36.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_36
+  tags:
+    - autenticacion
+    - cis_36
+
+- name: Incluir CIS 37 - Clave sensible a mayúsculas y minúsculas
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_37.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_37
+  tags:
+    - autenticacion
+    - cis_37
+
+- name: Incluir CIS 38 - Bloqueo de cuentas por inactividad
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_38.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_38
+  tags:
+    - autenticacion
+    - cis_38
+
+- name: Incluir CIS 39 - Vigencia de contraseña.
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_39.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_39
+  tags:
+    - autenticacion
+    - cis_39
+
+- name: Incluir CIS 40 - Rehúso de contraseñas
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_40.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_40
+  tags:
+    - autenticacion
+    - cis_40
+
+- name: Incluir CIS 41 - Tiempo de rehúso de contraseñas
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_41.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_41
+  tags:
+    - autenticacion
+    - cis_41
+
+- name: Incluir CIS 42 - Tiempo de rehuso de contraseñas
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_42.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_42
+  tags:
+    - autenticacion
+    - cis_42
+
+- name: Incluir CIS 43 - Tiempo de gracia de la contraseña
+  ansible.builtin.include_tasks:
+    file: autenticacion/cis_43.yml
+    apply:
+      tags:
+        - autenticacion
+        - cis_43
+  tags:
+    - autenticacion
+    - cis_43
+
+# CIS 1.4 -  Autorizacion
+- name: Incluir CIS 44 - Tablespace Default
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_44.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_44
+  tags:
+    - autorizacion
+    - cis_44
+
+- name: Incluir CIS 45 - Permisos de Diccionarios de objetos
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_45.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_45
+  tags:
+    - autorizacion
+    - cis_45
+
+- name: Incluir CIS 46 - Restringir acceso a tablas de sistema
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_46.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_46
+  tags:
+    - autorizacion
+    - cis_46
+
+- name: Incluir CIS 47 - Restringir el acceso a los roles del sistema
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_47.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_47
+  tags:
+    - autorizacion
+    - cis_47
+
+- name: Incluir CIS 48 - Privilegios de Sistema
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_48.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_48
+  tags:
+    - autorizacion
+    - cis_48
+
+- name: Incluir CIS 49 - ALL PRIVILEGES
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_49.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_49
+  tags:
+    - autorizacion
+    - cis_49
+
+- name: Incluir CIS 51 - WITH ADMIN
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_51.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_51
+  tags:
+    - autorizacion
+    - cis_51
+
+- name: Incluir CIS 52 - WITH GRANT
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_52.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_52
+  tags:
+    - autorizacion
+    - cis_52
+
+- name: Incluir CIS 53 - Restringir permisos DDL, DML, CREATE
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_53.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_53
+  tags:
+    - autorizacion
+    - cis_53
+
+- name: Incluir CIS 54 - Restringir permisos AUDIT SYSTEM
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_54.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_54
+  tags:
+    - autorizacion
+    - cis_54
+
+- name: Incluir CIS 55 - Restringir permisos PUBLIC
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_55.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_55
+  tags:
+    - autorizacion
+    - cis_55
+
+- name: Incluir CIS 56 - Restringir permisos RESOURCE
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_56.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_56
+  tags:
+    - autorizacion
+    - cis_56
+
+- name: Incluir CIS 57 - Restringir permisos DBMS_EXPORT_EXTENSION
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_57.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_57
+  tags:
+    - autorizacion
+    - cis_57
+
+- name: Incluir CIS 58 - Propiedad en archivos en $ORACLE_HOME/bin
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_58.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_58
+  tags:
+    - autorizacion
+    - cis_58
+
+- name: Incluir CIS 59 - Permisos en archivos en $ORACLE_HOME/bin
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_59.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_59
+  tags:
+    - autorizacion
+    - cis_59
+
+- name: Incluir CIS 60 - Permisos en archivos en ORACLE_HOME (sin incluir ORACLE_HOME/bin)
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_60.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_60
+  tags:
+    - autorizacion
+    - cis_60
+
+- name: Incluir CIS 61 - Archivo .profile de Oracle en UNIX
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_61.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_61
+  tags:
+    - autorizacion
+    - cis_61
+
+- name: Incluir CIS 62 - Permisos en archivos .ora
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_62.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_62
+  tags:
+    - autorizacion
+    - cis_62
+
+- name: Incluir CIS 65 - os_authent_prefix
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_65.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_65
+  tags:
+    - autorizacion
+    - cis_65
+
+- name: Incluir CIS 66 - init.ora / audit_file_dest
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_66.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_66
+  tags:
+    - autorizacion
+    - cis_66
+
+- name: Incluir CIS 67 - init.ora / user_dump_dest
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_67.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_67
+  tags:
+    - autorizacion
+    - cis_67
+
+- name: Incluir CIS 68 - init.ora / control_files
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_68.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_68
+  tags:
+    - autorizacion
+    - cis_68
+
+- name: Incluir CIS 69 - init.ora / log_archive_dest_n
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_69.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_69
+  tags:
+    - autorizacion
+    - cis_69
+
+- name: Incluir CIS 70
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_70.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_70
+  tags:
+    - autorizacion
+    - cis_70

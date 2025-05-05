@@ -1,0 +1,128 @@
+# roles/hardening/tasks/autenticacion/cis_34.yml
+---
+- name: CIS 34 - Verificación de usuarios con privilegios mínimos
+  block:
+    # Paso 1: Verificar conteo de usuarios con privilegio CONNECT
+    - name: (Check - CIS 34) - Contar usuarios con privilegio CONNECT
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select grantee, privilege from dba_sys_privs where privilege ='CONNECT');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_34_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Obtener detalles de los usuarios con privilegio CONNECT
+    - name: (Check - CIS 34) - Obtener detalles de usuarios con privilegio CONNECT
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select grantee || ',' || privilege || ',' || admin_option || ',' || common || ',' || inherited from dba_sys_privs where privilege ='CONNECT';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_34_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 34) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_34_count: "{{ cis_34_count_result.stdout | trim | int }}"
+        cis_34_detail_raw: "{{ cis_34_detail_result.stdout_lines | select('match', '.+,.+') | list }}"
+        cis_34_expected_count: 0
+
+    # Paso 4: Estructurar datos de usuarios encontrados
+    - name: (Check - CIS 34) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_34_connect_users: []
+
+    # Paso 5: Estructurar datos de usuarios encontrados si existen
+    - name: (Check - CIS 34) - Estructurar datos de usuarios encontrados
+      ansible.builtin.set_fact:
+        cis_34_connect_users: "{{ cis_34_connect_users | default([]) +
+          [{'grantee': user_item.split(',')[0] | trim,
+          'privilege': user_item.split(',')[1] | trim,
+          'admin_option': priv_item.split(',')[2] | trim,
+          'common': priv_item.split(',')[3] | trim,
+          'inherited': priv_item.split(',')[4] | trim,
+          'remediacion': 'REVOKE CONNECT FROM ' + user_item.split(',')[0] | trim + '; GRANT CREATE SESSION TO ' + user_item.split(',')[0] | trim + ';'}] }}"
+      loop: "{{ cis_34_detail_raw }}"
+      loop_control:
+        loop_var: user_item
+      when: cis_34_detail_raw | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 34) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_34_compliant_initial: "{{ cis_34_count | int == 0 }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 34) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de usuarios con privilegio CONNECT: {{ cis_34_count }}"
+          - "Usuarios encontrados: {{ cis_34_connect_users | length }}"
+          - "Estado de conformidad: {{ cis_34_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 34) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_34_needs_remediation: "{{ not cis_34_compliant_initial }}"
+        cis_34_compliant_final: "{{ cis_34_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_34_was_remediated: false
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 34 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_34] }}"
+      vars:
+        instance_result_cis_34:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_34:
+            parametro: "Usuarios locales con mínimos privilegios"
+            description: >-
+              Cuando se crea una nueva cuenta de usuario, se debe habilitar a este usuario para que acceda a la base de datos con los
+              permisos mínimos necesarios para acceder a los datos requeridos.
+            implementacion: |
+              Crear usuarios con privilegios mínimos necesarios:
+
+              CREATE USER user
+              IDENTIFIED BY password
+              DEFAULT TABLESPACE example
+              QUOTA 10M ON example
+              TEMPORARY TABLESPACE temp
+              QUOTA 5M ON system
+              PASSWORD EXPIRE;
+
+              GRANT CREATE SESSION TO user;
+            verificacion: >-
+              Para verificar qué usuarios tienen el privilegio CONNECT en lugar del recomendado CREATE SESSION:
+              select count(*) valor from (select grantee, privilege from dba_sys_privs where privilege ='CONNECT');
+              select grantee, privilege from dba_sys_privs where privilege ='CONNECT';
+            remediacion: |
+              Revocar el privilegio CONNECT y otorgar CREATE SESSION:
+              <br>select 'Revoke '||granted_role||' from '|| grantee|| ' ;' remediacion from dba_role_privs where granted_role in ('DBA','RESOURCE','CONNECT')
+              and grantee not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,
+              'DIP','XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM'  ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,
+              'ANONYMOUS','WMSYS' ,'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF') ;
+            nota: >-
+              Este control requiere remediación manual..
+            type: "security"
+            expected_count: "{{ cis_34_expected_count }}"
+            actual_count: "{{ cis_34_count }}"
+            connect_users: "{{ cis_34_connect_users }}"
+            compliant_initial: "{{ cis_34_compliant_initial }}"
+            compliant_final: "{{ cis_34_compliant_final }}"
+            needs_remediation: "{{ cis_34_needs_remediation }}"
+            was_remediated: "{{ cis_34_was_remediated }}"

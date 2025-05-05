@@ -1,0 +1,143 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_1.yml
+---
+- name: CIS 1 - Verificación de versiones y parches Oracle
+  block:
+    # Paso 1: Ejecutar comando opatch lspatches para obtener información de parches
+    - name: (Check - CIS 1) - Ejecutar opatch lspatches
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        {{ hardening_oracle_home }}/OPatch/opatch lspatches
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_1_opatch_result
+      changed_when: false
+
+    # Paso 2: Verificar presencia de los parches requeridos
+    - name: (Check - CIS 1) - Verificar presencia de parches requeridos
+      ansible.builtin.set_fact:
+        cis_1_has_database_release: "{{ cis_1_opatch_result.stdout is regex('Database Release Update') }}"
+        cis_1_has_ocw_release: "{{ cis_1_opatch_result.stdout is regex('OCW RELEASE UPDATE') }}"
+        cis_1_has_ojvm_release: "{{ cis_1_opatch_result.stdout is regex('OJVM RELEASE UPDATE') }}"
+
+    # Paso 3: Inicializar versiones con valores seguros por defecto
+    - name: (Check - CIS 1) - Inicializar versiones por defecto
+      ansible.builtin.set_fact:
+        cis_1_db_version: "0"
+        cis_1_ocw_version: "0"
+        cis_1_ojvm_version: "0"
+
+    # Paso 4a: Extraer la versión de Database Release Update si está presente
+    - name: (Check - CIS 1) - Extraer versión de Database Release Update
+      ansible.builtin.set_fact:
+        cis_1_db_release_info: "{{ cis_1_opatch_result.stdout
+          | regex_findall('Database Release Update.+?(\\d+\\.\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?)') | first | default('0.0.0.0') }}"
+      when: cis_1_has_database_release
+
+    # Paso 4b: Extraer la versión de OCW RELEASE UPDATE si está presente
+    - name: (Check - CIS 1) - Extraer versión de OCW RELEASE UPDATE
+      ansible.builtin.set_fact:
+        cis_1_ocw_release_info: "{{ cis_1_opatch_result.stdout
+          | regex_findall('OCW RELEASE UPDATE.+?(\\d+\\.\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?)') | first | default('0.0.0.0') }}"
+      when: cis_1_has_ocw_release
+
+    # Paso 4c: Extraer la versión de OJVM RELEASE UPDATE si está presente
+    - name: (Check - CIS 1) - Extraer versión de OJVM RELEASE UPDATE
+      ansible.builtin.set_fact:
+        cis_1_ojvm_release_info: "{{ cis_1_opatch_result.stdout
+          | regex_findall('OJVM RELEASE UPDATE.+?(\\d+\\.\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?)') | first | default('0.0.0.0') }}"
+      when: cis_1_has_ojvm_release
+
+    # Paso 5: Interpretación numérica de las versiones para comparación
+    - name: (Check - CIS 1) - Interpretar valores numéricos para comparación
+      ansible.builtin.set_fact:
+        # Extrae el segundo número de la versión (ej: de 19.3.0.0.0 extrae el 3)
+        cis_1_db_version: "{{ cis_1_db_release_info | default('0.0.0.0') | regex_replace('^\\d+\\.(\\d+).*', '\\1') }}"
+        cis_1_ocw_version: "{{ cis_1_ocw_release_info | default('0.0.0.0') | regex_replace('^\\d+\\.(\\d+).*', '\\1') }}"
+        cis_1_ojvm_version: "{{ cis_1_ojvm_release_info | default('0.0.0.0') | regex_replace('^\\d+\\.(\\d+).*', '\\1') }}"
+
+    # Paso 6: Verificar si las versiones cumplen con el requisito (≥ 19.26)
+    - name: (Check - CIS 1) - Verificar versiones
+      ansible.builtin.set_fact:
+        cis_1_db_version_ok: "{{ cis_1_db_version | int >= 26 if cis_1_has_database_release else false }}"
+        cis_1_ocw_version_ok: "{{ cis_1_ocw_version | int >= 26 if cis_1_has_ocw_release else false }}"
+        cis_1_ojvm_version_ok: "{{ cis_1_ojvm_version | int >= 26 if cis_1_has_ojvm_release else false }}"
+
+    # Paso 7: Determinar el cumplimiento global
+    - name: (Check - CIS 1) - Determinar conformidad
+      ansible.builtin.set_fact:
+        cis_1_compliant_initial:
+          "{{ cis_1_has_database_release and cis_1_has_ocw_release and cis_1_has_ojvm_release
+          and cis_1_db_version_ok and cis_1_ocw_version_ok and cis_1_ojvm_version_ok }}"
+
+    # Paso 8: Mostrar los resultados para depuración
+    - name: (Check - CIS 1) - Mostrar resultados de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Database Release Update: {{ cis_1_has_database_release }}"
+          - "* Info: {{ cis_1_db_release_info | default('No presente') }}"
+          - "* Versión: {{ cis_1_db_version }}"
+          - "* OK: {{ cis_1_db_version_ok }}"
+          - "OCW RELEASE UPDATE: {{ cis_1_has_ocw_release }}"
+          - "* Info: {{ cis_1_ocw_release_info | default('No presente') }}"
+          - "* Versión: {{ cis_1_ocw_version }}"
+          - "* OK: {{ cis_1_ocw_version_ok }}"
+          - "OJVM RELEASE UPDATE: {{ cis_1_has_ojvm_release }}"
+          - "* Info: {{ cis_1_ojvm_release_info | default('No presente') }}"
+          - "* Versión: {{ cis_1_ojvm_version }}"
+          - "* OK: {{ cis_1_ojvm_version_ok }}"
+          - ""
+          - "Estado de cumplimiento: {{ cis_1_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 9: Información sobre remediación (manual)
+    - name: (Notice - CIS 1) - Información sobre remediación
+      ansible.builtin.debug:
+        msg: "La actualización de parches Oracle requiere intervención manual desde My Oracle Support."
+      when: not cis_1_compliant_initial
+
+    # Paso 10: Establecer valores finales
+    - name: (Check - CIS 1) - Establecer estado final
+      ansible.builtin.set_fact:
+        cis_1_compliant_final: "{{ cis_1_compliant_initial }}"
+        cis_1_was_remediated: false
+
+    # Paso 11: Agregar resultados a la estructura global para el reporte
+    - name: Agregar resultados de CIS 1 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_1] }}"
+      vars:
+        instance_result_cis_1:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_1:
+            parametro: "Versiones / Parches"
+            description: >-
+              Asegúrese de que está instalada la última versión de Oracle y se apliquen los últimos parches liberados por el fabricante y
+              aprobados por el banco."
+            implementacion: "Descargar el parche adecuado (PSU, CPU) y aplicarlo en la base de datos."
+            verificacion: "Verificar lspatches utilizando: opatch lspatches. El binario 'opatch' se encuentra en el $ORACLE_HOME/OPatch."
+            commando: "opatch lspatches"
+            nota: >-
+              Para ingresar a la última URL se requiere una cuenta de soporte de Oracle.
+              El resultado arrojado dará como conformidad cuando existan explícitamente estos 3 items:
+              <br>- Database Release Update
+              <br>- OCW RELEASE UPDATE
+              <br>- OJVM RELEASE UPDATE
+              <br>- Versión de todos ellos sea >= 19.26......
+            type: "manual"
+            opatch_output: "{{ cis_1_opatch_result.stdout_lines }}"
+            has_database_release: "{{ cis_1_has_database_release }}"
+            has_ocw_release: "{{ cis_1_has_ocw_release }}"
+            has_ojvm_release: "{{ cis_1_has_ojvm_release }}"
+            db_release_info: "{{ cis_1_db_release_info | default('No presente') }}"
+            ocw_release_info: "{{ cis_1_ocw_release_info | default('No presente') }}"
+            ojvm_release_info: "{{ cis_1_ojvm_release_info | default('No presente') }}"
+            db_version: "{{ cis_1_db_version }}"
+            ocw_version: "{{ cis_1_ocw_version }}"
+            ojvm_version: "{{ cis_1_ojvm_version }}"
+            db_version_ok: "{{ cis_1_db_version_ok }}"
+            ocw_version_ok: "{{ cis_1_ocw_version_ok }}"
+            ojvm_version_ok: "{{ cis_1_ojvm_version_ok }}"
+            compliant_initial: "{{ cis_1_compliant_initial }}"
+            compliant_final: "{{ cis_1_compliant_final }}"
+            was_remediated: "{{ cis_1_was_remediated }}"

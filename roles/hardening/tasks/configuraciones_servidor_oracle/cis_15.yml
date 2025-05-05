@@ -1,0 +1,156 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_15.yml
+---
+- name: CIS 15 - Verificación de sqlnet.inbound_connect_timeout
+  block:
+    # Paso 1: Verificar la existencia del archivo sqlnet.ora
+    - name: (Check - CIS 15) - Comprobar si existe el archivo sqlnet.ora
+      ansible.builtin.stat:
+        path: "{{ hardening_oracle_home }}/network/admin/sqlnet.ora"
+      register: cis_15_sqlnet_file
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Paso 2: Verificar el valor actual de sqlnet.inbound_connect_timeout
+    - name: (Check - CIS 15) - Leer el valor actual de sqlnet.inbound_connect_timeout
+      ansible.builtin.shell: |
+        set -o pipefail
+        grep -i "sqlnet.inbound_connect_timeout" {{ hardening_oracle_home }}/network/admin/sqlnet.ora | grep -v "^#" | awk -F= '{print $2}' | tr -d ' '
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_15_timeout_result
+      changed_when: false
+      failed_when: false
+      when: cis_15_sqlnet_file.stat.exists
+
+    # Paso 3: Procesar el resultado y establecer banderas si el archivo existe
+    - name: (Check - CIS 15) - Procesar resultado
+      ansible.builtin.set_fact:
+        cis_15_file_exists: "{{ cis_15_sqlnet_file.stat.exists }}"
+        cis_15_param_exists: "{{ cis_15_timeout_result.stdout | default('') | trim != '' }}"
+        cis_15_param_value: "{{ cis_15_timeout_result.stdout | default('') | trim }}"
+      when: cis_15_sqlnet_file.stat.exists
+
+    # Paso 4: Establecer valores por defecto si el archivo no existe
+    - name: (Check - CIS 15) - Establecer valores por defecto si el archivo no existe
+      ansible.builtin.set_fact:
+        cis_15_file_exists: false
+        cis_15_param_exists: false
+        cis_15_param_value: ""
+      when: not cis_15_sqlnet_file.stat.exists | default(false)
+
+    # Paso 5: Establecer el valor esperado y determinar cumplimiento
+    - name: (Check - CIS 15) - Establecer valor esperado y determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_15_expected_value: "3"
+        cis_15_compliant_initial: "{{ cis_15_file_exists and cis_15_param_exists and cis_15_param_value == '3' }}"
+
+    # Paso 6: Debug para mostrar la información detectada
+    - name: (Check - CIS 15) - Mostrar información detectada
+      ansible.builtin.debug:
+        msg:
+          - "Archivo sqlnet.ora existe: {{ cis_15_file_exists }}"
+          - "Parámetro sqlnet.inbound_connect_timeout existe: {{ cis_15_param_exists }}"
+          - "Valor actual: {{ cis_15_param_value }}"
+          - "Valor esperado: {{ cis_15_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_15_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 15) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_15_needs_remediation: "{{ not cis_15_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 15) - Configurar sqlnet.inbound_connect_timeout
+      when: cis_15_needs_remediation
+      block:
+        # Paso 8.1: Crear una copia de seguridad del archivo sqlnet.ora si existe
+        - name: (Remediation - CIS 15) - Crear copia de seguridad de sqlnet.ora
+          ansible.builtin.copy:
+            src: "{{ hardening_oracle_home }}/network/admin/sqlnet.ora"
+            dest: "{{ hardening_oracle_home }}/network/admin/sqlnet.ora.{{ ansible_date_time.date }}"
+            remote_src: true
+            mode: "{{ cis_15_sqlnet_file.stat.mode }}"
+            owner: "{{ cis_15_sqlnet_file.stat.pw_name }}"
+            group: "{{ cis_15_sqlnet_file.stat.gr_name }}"
+          become: true
+          become_user: root
+          when: cis_15_file_exists
+
+        # Paso 8.2: Crear el archivo sqlnet.ora si no existe
+        - name: (Remediation - CIS 15) - Crear el archivo sqlnet.ora si no existe
+          ansible.builtin.file:
+            path: "{{ hardening_oracle_home }}/network/admin/sqlnet.ora"
+            state: touch
+            owner: "{{ hardening_current_user }}"
+            group: "{{ hardening_oracle_grp }}"
+            mode: "0644"
+          become: true
+          become_user: root
+          when: not cis_15_file_exists
+
+        # Paso 8.3: Agregar o actualizar el parámetro en el archivo
+        - name: (Remediation - CIS 15) - Configurar parámetro sqlnet.inbound_connect_timeout
+          ansible.builtin.lineinfile:
+            path: "{{ hardening_oracle_home }}/network/admin/sqlnet.ora"
+            regexp: "^\\s*sqlnet.inbound_connect_timeout\\s*="
+            line: "sqlnet.inbound_connect_timeout={{ cis_15_expected_value }}"
+            state: present
+            backup: false
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_15_remediation_result
+
+        # Paso 8.4: Mostrar mensaje informativo sobre reinicio pendiente
+        - name: (Remediation - CIS 15) - Informar sobre reinicio pendiente
+          ansible.builtin.debug:
+            msg: "NOTA: Se ha modificado el parámetro sqlnet.inbound_connect_timeout={{ cis_15_expected_value }}"
+
+        # Paso 8.5: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 15) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_15_was_remediated: true
+            cis_15_compliant_final: true
+            cis_15_remediated_value: "{{ cis_15_expected_value }}"
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 15) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_15_was_remediated: false
+        cis_15_compliant_final: "{{ cis_15_compliant_initial }}"
+        cis_15_remediated_value: "{{ cis_15_param_value }}"
+      when: not cis_15_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 15 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_15] }}"
+      vars:
+        instance_result_cis_15:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_15:
+            parametro: "sqlnet.inbound_connect_timeout"
+            description: >-
+              Permitir que las conexiones entrantes se mantengan abiertas aumenta el consumo de recursos,
+              lo cual puede generar una denegación de servicio, por lo cual se recomienda limitar el tiempo en el cual las conexiones se mantienen activas."
+            implementacion: |
+              En el archivo sqlnet.ora, configurar el siguiente parámetro:
+              sqlnet.inbound_connect_timeout=3
+            verificacion: >-
+              Verificar la configuración establecida con el comando:
+              grep -i inbound_connect_timeout sqlnet.ora
+            commando: |
+              cd $ORACLE_HOME/network/admin
+              grep -i inbound_connect_timeout sqlnet.ora
+            nota: >-
+              La configuración de este valor en un nivel muy bajo puede ocasionar que los usuarios no se conecten a la base de datos.
+              Se debe aplicar el valor recomendado e ir aumentándolo hasta que opere correctamente.
+            type: "network"
+            file_exists: "{{ cis_15_file_exists }}"
+            param_exists: "{{ cis_15_param_exists }}"
+            param_value: "{{ cis_15_param_value }}"
+            expected_value: "{{ cis_15_expected_value }}"
+            remediated_value: "{{ cis_15_remediated_value | default(cis_15_param_value) }}"
+            compliant_initial: "{{ cis_15_compliant_initial }}"
+            compliant_final: "{{ cis_15_compliant_final }}"
+            was_remediated: "{{ cis_15_was_remediated }}"

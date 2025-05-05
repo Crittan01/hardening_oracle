@@ -1,0 +1,148 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_7.yml
+---
+- name: CIS 7 - Verificación de global_names
+  block:
+    # Paso 1: Verificar si es cluster o no
+    - name: (Check - CIS 7) - Verificar si la base de datos es cluster
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='cluster_database';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_7_cluster_check_result
+      changed_when: false
+
+    # Paso 2: Determinar si es cluster basado en el valor obtenido
+    - name: (Check - CIS 7) - Determinar si es cluster
+      ansible.builtin.set_fact:
+        cis_7_is_cluster: "{{ cis_7_cluster_check_result.stdout | trim | upper == 'TRUE' }}"
+
+    # Paso 3: Verificar el valor actual de global_names
+    - name: (Check - CIS 7) - Verificar valor actual de global_names
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='global_names';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_7_global_names_result
+      changed_when: false
+
+    # Paso 4: Procesar el valor obtenido
+    - name: (Check - CIS 7) - Procesar valor de global_names
+      ansible.builtin.set_fact:
+        cis_7_global_names_value: "{{ cis_7_global_names_result.stdout | trim | upper }}"
+
+    # Paso 5: Determinar el valor esperado según el tipo de instalación
+    - name: (Check - CIS 7) - Establecer valor esperado
+      ansible.builtin.set_fact:
+        cis_7_expected_value: "{{ 'FALSE' if cis_7_is_cluster else 'TRUE' }}"
+
+    # Paso 6: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 7) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_7_compliant_initial: "{{ cis_7_global_names_value == cis_7_expected_value }}"
+
+    # Paso 7: Debug avanzado para ayudar a diagnosticar problemas
+    - name: (Check - CIS 7) - Debug de valores para comparación
+      ansible.builtin.debug:
+        msg:
+          - "Valor global_names actual (texto): '{{ cis_7_global_names_value }}'"
+          - "Valor esperado (texto): '{{ cis_7_expected_value }}'"
+          - "¿Son iguales?: {{ cis_7_global_names_value == cis_7_expected_value }}"
+          - "¿Es cluster?: {{ cis_7_is_cluster }}"
+          - "¿Cumple si es cluster?: {{ cis_7_is_cluster and cis_7_global_names_value == 'FALSE' }}"
+          - "¿Cumple si es standalone?: {{ not cis_7_is_cluster and cis_7_global_names_value == 'TRUE' }}"
+        verbosity: 0
+
+    # Paso 8: Mostrar resultados para depuración
+    - name: (Check - CIS 7) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Es cluster: {{ cis_7_is_cluster }}"
+          - "Valor actual de global_names: {{ cis_7_global_names_value }}"
+          - "Valor esperado: {{ cis_7_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_7_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 9: Determinar si se requiere remediación
+    - name: (Check - CIS 7) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_7_needs_remediation: "{{ not cis_7_compliant_initial }}"
+
+    # Paso 10: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 7) - Configurar global_names
+      when: cis_7_needs_remediation
+      block:
+        # Paso 10.1: Aplicar la remediación
+        - name: (Remediation - CIS 7) - Configurar global_names con el valor correcto
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET global_names={{ cis_7_expected_value }} SCOPE=SPFILE SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_7_remediation_result
+          changed_when: "'System altered' in cis_7_remediation_result.stdout"
+
+        # Paso 10.2: Verificar si se requiere reinicio
+        - name: (Remediation - CIS 7) - Indicar que se requiere reiniciar la instancia
+          ansible.builtin.debug:
+            msg: "Se ha modificado el parámetro global_names. Para la instancia {{ hardening_current_instance }}."
+
+        # Paso 10.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 7) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_7_was_remediated: true
+            cis_7_compliant_final: true
+            cis_7_remediated_value: "{{ cis_7_expected_value }} (pendiente reinicio)"
+
+    # Paso 11: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 7) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_7_was_remediated: false
+        cis_7_compliant_final: "{{ cis_7_compliant_initial }}"
+        cis_7_remediated_value: "{{ cis_7_global_names_value }}"
+      when: not cis_7_needs_remediation | bool
+
+    # Paso 12: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 7 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_7] }}"
+      vars:
+        instance_result_cis_7:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_7:
+            parametro: "global_names"
+            description: "Asegúrese que el nombre del link de la base de datos es el mismo que el nombre de la base de datos remota."
+            implementacion: |
+              En el archivo init.ora, configurar el siguiente parámetro:
+              global_names=TRUE
+              NOTA: Para cuando se tiene una instalación tipo cluster, se debe dejar este parámetro en FALSE
+            verificacion: >-
+              Verificar la configuración establecida. Abrir el archivo: init.ora y cambiar este
+              parámetro o cambiar utilizar la consola OEM y modificar este parámetro
+            commando: select name, value from v$parameter where name='global_names';
+            nota: Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto
+            type: "configuration"
+            is_cluster: "{{ cis_7_is_cluster }}"
+            global_names_value: "{{ cis_7_global_names_value }}"
+            expected_value: "{{ cis_7_expected_value }}"
+            remediated_value: "{{ cis_7_remediated_value | default(cis_7_global_names_value) }}"
+            compliant_initial: "{{ cis_7_compliant_initial }}"
+            compliant_final: "{{ cis_7_compliant_final }}"
+            was_remediated: "{{ cis_7_was_remediated }}"

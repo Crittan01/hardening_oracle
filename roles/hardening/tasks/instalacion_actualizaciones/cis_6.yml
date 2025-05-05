@@ -1,0 +1,75 @@
+# roles/hardening/tasks/instalacion_actualizaciones/cis_6.yml
+---
+- name: CIS 6 - Verificar objetos OEM (Oracle Enterprise Manager)
+  block:
+    # Verificar la existencia del binario dbsnmp
+    - name: (Check - CIS 6) - Verificar la existencia de los objetos OEM (dbsnmp)
+      ansible.builtin.stat:
+        path: "{{ hardening_oracle_home }}/bin/dbsnmp"
+        get_attributes: true
+        get_mime: false
+        get_checksum: false
+      register: cis_6_dbsnmp_stat
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Procesar detalles del archivo utilizando stat
+    - name: (Check - CIS 6) - Procesar detalles del archivo si existe
+      ansible.builtin.set_fact:
+        cis_6_object_exists: "{{ cis_6_dbsnmp_stat.stat.exists | default(false) }}"
+        cis_6_object_perms: "{{ cis_6_dbsnmp_stat.stat.mode | default('N/A') }}"
+        cis_6_object_owner: "{{ cis_6_dbsnmp_stat.stat.pw_name | default('N/A') }}"
+        cis_6_object_group: "{{ cis_6_dbsnmp_stat.stat.gr_name | default('N/A') }}"
+      when: cis_6_dbsnmp_stat.stat.exists | default(false)
+
+    # Establecer valores por defecto si el archivo no existe
+    - name: (Check - CIS 6) - Establecer valores por defecto si el archivo no existe
+      ansible.builtin.set_fact:
+        cis_6_object_exists: false
+        cis_6_object_perms: "N/A"
+        cis_6_object_owner: "N/A"
+        cis_6_object_group: "N/A"
+      when: not cis_6_dbsnmp_stat.stat.exists | default(false)
+
+    # Determinar cumplimiento: consideramos conforme si el objeto OEM no existe
+    - name: (Check - CIS 6) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_6_compliant_initial: "{{ not cis_6_object_exists }}"
+        cis_6_compliant_final: "{{ not cis_6_object_exists }}"
+        cis_6_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 6) - Mostrar resultados de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Objeto OEM (dbsnmp) existe: {{ cis_6_object_exists }}"
+          - "Permisos: {{ cis_6_object_perms }}"
+          - "Propietario: {{ cis_6_object_owner }}"
+          - "Grupo: {{ cis_6_object_group }}"
+          - "Cumplimiento: {{ cis_6_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global de la instancia
+    - name: Agregar resultados de CIS 6 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_6] }}"
+      vars:
+        instance_result_cis_6:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_6:
+            parametro: "Objetos OEM"
+            description: "Restringir los objetos OEM (Oracle Enterprise Manager) si no son usados."
+            implementacion: |
+              Verificar la existencia de los objetos: $ORACLE_HOME/bin/dbsnmp
+            verificacion: >-
+              "Restringir los objetos OEM si no son usados. Oracle Enterprise Manager.
+            nota: No Aplica porque las Bases de datos se monitorean por el Cloud Control
+            comando: ls –al $ORACLE_HOME/bin/dbsnmp"
+            type: "verification"
+            object_exists: "{{ cis_6_object_exists }}"
+            object_perms: "{{ cis_6_object_perms }}"
+            object_owner: "{{ cis_6_object_owner }}"
+            object_group: "{{ cis_6_object_group }}"
+            compliant_initial: "{{ cis_6_compliant_initial }}"
+            compliant_final: "{{ cis_6_compliant_final }}"
+            was_remediated: "{{ cis_6_was_remediated }}"

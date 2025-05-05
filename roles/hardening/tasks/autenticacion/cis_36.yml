@@ -1,0 +1,119 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_36.yml
+---
+- name: CIS 36 - Verificación de Intentos Fallidos de Conexión
+  block:
+    # Paso 1: Ejecutar consulta para verificar el parámetro SEC_MAX_FAILED_LOGIN_ATTEMPTS
+    - name: (Check - CIS 36) - Verificar configuración de SEC_MAX_FAILED_LOGIN_ATTEMPTS
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT UPPER(VALUE) FROM V\$SYSTEM_PARAMETER WHERE UPPER(NAME)='SEC_MAX_FAILED_LOGIN_ATTEMPTS';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_36_check_result
+      changed_when: false
+
+    # Paso 2: Procesar el resultado y convertir a entero
+    - name: (Check - CIS 36) - Procesar resultado
+      ansible.builtin.set_fact:
+        cis_36_current_value: "{{ cis_36_check_result.stdout | trim }}"
+        cis_36_current_value_int: "{{ cis_36_check_result.stdout | trim | int }}"
+        cis_36_expected_value: 3
+
+    - name: (Check - CIS 36) - Debug valores para comparación
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual (texto): '{{ cis_36_current_value }}'"
+          - "Valor actual (int): {{ cis_36_current_value_int }}"
+          - "Valor esperado: 3"
+          - "¿Son iguales (texto)?: {{ cis_36_current_value == '3' }}"
+          - "¿Son iguales (int)?: {{ cis_36_current_value_int | int == 3 }}"
+
+    - name: (Check - CIS 36) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_36_compliant_initial: "{{ (cis_36_current_value | trim == '3') or (cis_36_current_value_int | int == 3) }}"
+
+    # Paso 4: Mostrar resultados para depuración
+    - name: (Check - CIS 36) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de SEC_MAX_FAILED_LOGIN_ATTEMPTS: {{ cis_36_current_value }}"
+          - "Valor esperado: {{ cis_36_expected_value }}"
+          - "Estado de conformidad: {{ cis_36_compliant_initial }}"
+
+    # Paso 5: Determinar si se requiere remediación
+    - name: (Check - CIS 36) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_36_needs_remediation: "{{ not cis_36_compliant_initial }}"
+
+    # Paso 6: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 36) - Configurar intentos fallidos de conexión
+      when: cis_36_needs_remediation
+      block:
+        # Paso 6.1: Aplicar la remediación
+        - name: (Remediation - CIS 36) - Configurar FAILED_LOGIN_ATTEMPTS a 3
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER PROFILE DEFAULT LIMIT FAILED_LOGIN_ATTEMPTS 3;
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_36_remediation_result
+          changed_when: "'Profile altered' in cis_36_remediation_result.stdout"
+
+        # Paso 6.2: Establecer estado después de la remediación
+        - name: (Remediation - CIS 36) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_36_compliant_final: true
+            cis_36_was_remediated: true
+            cis_36_remediated_value: "3"
+            cis_36_requires_restart: false
+
+    # Paso 7: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 36) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_36_compliant_final: "{{ cis_36_compliant_initial }}"
+        cis_36_was_remediated: false
+        cis_36_remediated_value: "{{ cis_36_current_value }}"
+        cis_36_requires_restart: false
+      when: not cis_36_needs_remediation | bool
+
+    # Paso 8: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 36 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_36] }}"
+      vars:
+        instance_result_cis_36:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_36:
+            parametro: "Intentos fallidos de conexión"
+            description: "Contador de intentos de conexión inválidos."
+            implementacion: |
+              Para configurar en el profile Default, ejecute la siguiente sentencia:
+              Alter profile DEFAULT limit FAILED_LOGIN_ATTEMPTS 3;
+            verificacion: >-
+              Para verificar el estado del parámetro FAILED_LOGIN_ATTEMPTS, ejecute la siguiente sentencia:
+              SELECT UPPER(VALUE) valor FROM V$SYSTEM_PARAMETER WHERE UPPER(NAME)='SEC_MAX_FAILED_LOGIN_ATTEMPTS';
+            remediacion: |
+              ALTER PROFILE DEFAULT LIMIT FAILED_LOGIN_ATTEMPTS 3;
+            nota: >-
+              Un valor de 3 para FAILED_LOGIN_ATTEMPTS es recomendado por los estándares de seguridad.
+              Esto bloquea la cuenta después de 3 intentos fallidos de inicio de sesión.
+              Este cambio se aplica de forma inmediata, validar si requiere reinicio de servicios.
+            type: "security"
+            current_value: "{{ cis_36_current_value }}"
+            expected_value: "{{ cis_36_expected_value }}"
+            remediated_value: "{{ cis_36_remediated_value | default(cis_36_current_value) }}"
+            requires_restart: "{{ cis_36_requires_restart | default(false) }}"
+            compliant_initial: "{{ cis_36_compliant_initial }}"
+            compliant_final: "{{ cis_36_compliant_final }}"
+            was_remediated: "{{ cis_36_was_remediated }}"

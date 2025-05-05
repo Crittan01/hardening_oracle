@@ -1,0 +1,135 @@
+# roles/hardening/tasks/autenticacion/cis_38.yml
+---
+- name: CIS 38 - Verificación de Bloqueo de cuentas por inactividad
+  block:
+    # Paso 1: Ejecutar únicamente la consulta proporcionada en el instructivo
+    - name: (Check - CIS 38) - Verificar configuración de INACTIVE_ACCOUNT_TIME
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT P.PROFILE || ',' || P.RESOURCE_NAME || ',' || P.LIMIT FROM DBA_PROFILES P
+        WHERE TO_NUMBER(DECODE(P.LIMIT,'DEFAULT',(SELECT DISTINCT DECODE(LIMIT,'UNLIMITED',9999,LIMIT)
+        FROM DBA_PROFILES WHERE PROFILE='DEFAULT' AND RESOURCE_NAME='INACTIVE_ACCOUNT_TIME'),
+        'UNLIMITED','9999', P.LIMIT)) > 90
+        AND P.RESOURCE_NAME = 'INACTIVE_ACCOUNT_TIME'
+        AND EXISTS ( SELECT 'X' FROM DBA_USERS U WHERE U.PROFILE = P.PROFILE );
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_38_check_result
+      changed_when: false
+
+    # Paso 2: Procesar los resultados de la consulta
+    - name: (Check - CIS 38) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_38_noncompliant_profiles_raw: "{{ cis_38_check_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+        cis_38_expected_value: "90"
+
+    # Paso 3: Estructurar datos de perfiles no conformes
+    - name: (Check - CIS 38) - Estructurar datos de perfiles no conformes
+      ansible.builtin.set_fact:
+        cis_38_noncompliant_profiles:
+          "{{ cis_38_noncompliant_profiles | default([]) +
+          [{'profile': profile_item.split(',')[0] | trim,
+          'resource': profile_item.split(',')[1] | trim,
+          'limit': profile_item.split(',')[2] | trim}] }}"
+      loop: "{{ cis_38_noncompliant_profiles_raw }}"
+      loop_control:
+        loop_var: profile_item
+      when: cis_38_noncompliant_profiles_raw | length > 0
+
+    # Paso 4: Verificar si el perfil DEFAULT está entre los no conformes
+    - name: (Check - CIS 38) - Verificar si DEFAULT está entre los perfiles no conformes
+      ansible.builtin.set_fact:
+        cis_38_default_in_results: "{{ cis_38_noncompliant_profiles | default([]) | selectattr('profile', 'equalto', 'DEFAULT') | list | length > 0 }}"
+        cis_38_default_profile: "{{ cis_38_noncompliant_profiles | default([]) | selectattr('profile', 'equalto', 'DEFAULT') | first | default({}) }}"
+      when: cis_38_noncompliant_profiles is defined and cis_38_noncompliant_profiles | length > 0
+
+    # Paso 5: Determinar estado de conformidad
+    - name: (Check - CIS 38) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_38_compliant_initial: "{{ (cis_38_noncompliant_profiles_raw | default([])) | length == 0 }}"
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 38) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de perfiles no conformes: {{ cis_38_noncompliant_profiles | default([]) | length }}"
+          - "¿Perfil DEFAULT no conforme?: {{ cis_38_default_in_results | default(false) }}"
+          - "Estado general de conformidad: {{ cis_38_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 38) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_38_needs_remediation: "{{ not cis_38_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 38) - Configurar bloqueo de cuentas por inactividad
+      when: cis_38_needs_remediation
+      block:
+        # Paso 8.1: Remediar perfil DEFAULT primero (siempre, según instructivo)
+        - name: (Remediation - CIS 38) - Configurar INACTIVE_ACCOUNT_TIME en perfil DEFAULT
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER PROFILE DEFAULT LIMIT INACTIVE_ACCOUNT_TIME 90;
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_38_default_remediation
+          changed_when: "'Profile altered' in cis_38_default_remediation.stdout"
+
+        # Paso 8.2: Establecer estado después de la remediación
+        - name: (Remediation - CIS 38) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_38_compliant_final: true
+            cis_38_was_remediated: true
+            cis_38_requires_restart: false
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 38) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_38_compliant_final: "{{ cis_38_compliant_initial }}"
+        cis_38_was_remediated: false
+        cis_38_requires_restart: false
+      when: not cis_38_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 38 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_38] }}"
+      vars:
+        instance_result_cis_38:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_38:
+            parametro: "Bloqueo de cuentas por inactividad"
+            description: "Se debe bloquear las cuentas de usuario que no se han conectado a una instancia de base de datos por más de 90 días."
+            implementacion: |
+              Para configurar en el profile Default, ejecute la siguiente sentencia:
+              Alter profile DEFAULT limit INACTIVE_ACCOUNT_TIME 90;
+            verificacion: >-
+              Para verificar el estado del parámetro INACTIVE_ACCOUNT_TIME, ejecute la siguiente sentencia:
+              SELECT P.PROFILE, P.RESOURCE_NAME, P.LIMIT FROM DBA_PROFILES P WHERE TO_NUMBER(DECODE(P.LIMIT,'DEFAULT',(SELECT DISTINCT
+              DECODE(LIMIT,'UNLIMITED',9999,LIMIT) FROM DBA_PROFILES WHERE PROFILE='DEFAULT' AND RESOURCE_NAME='INACTIVE_ACCOUNT_TIME'), 'UNLIMITED','9999',
+              P.LIMIT)) > 90 AND P.RESOURCE_NAME = 'INACTIVE_ACCOUNT_TIME' AND EXISTS ( SELECT 'X' FROM DBA_USERS U WHERE U.PROFILE = P.PROFILE );
+            remediacion: |
+              ALTER PROFILE DEFAULT LIMIT INACTIVE_ACCOUNT_TIME 90;
+            nota: >-
+              Este límite hace que las cuentas de usuario que no se han utilizado durante más de 90 días se bloqueen automáticamente,
+            type: "security"
+            expected_value: "{{ cis_38_expected_value }}"
+            noncompliant_profiles: "{{ cis_38_noncompliant_profiles | default([]) }}"
+            default_in_results: "{{ cis_38_default_in_results | default(false) }}"
+            default_profile_data: "{{ cis_38_default_profile | default({}) }}"
+            requires_restart: "{{ cis_38_requires_restart | default(false) }}"
+            compliant_initial: "{{ cis_38_compliant_initial }}"
+            compliant_final: "{{ cis_38_compliant_final }}"
+            was_remediated: "{{ cis_38_was_remediated }}"

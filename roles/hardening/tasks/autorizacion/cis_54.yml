@@ -1,0 +1,114 @@
+# roles/hardening/tasks/autorizacion/cis_53.yml
+---
+- name: Verificacion permisos AUDIT SYSTEM
+  block:
+    # Paso 1: Ejecutar la consulta detallada acorde al instructivo
+    - name: (Check - CIS 54) - Verificar permisos AUDIT SYSTEM
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select grantee || ',' || privilege || ',' || admin_option || ',' || common || ',' || inherited from dba_sys_privs where privilege ='AUDIT SYSTEM'
+        and grantee not in ('DBA','IMP_FULL_DATABASE','SYS', 'AUDIT_ADMIN','DATAPUMP_IMP_FULL_DATABASE');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_54_detail_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 2: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 54) - Conteo permisos AUDIT SYSTEM
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) valor from (select * from dba_sys_privs where privilege ='AUDIT SYSTEM' and grantee not in ('DBA','IMP_FULL_DATABASE','SYS',
+        'AUDIT_ADMIN','DATAPUMP_IMP_FULL_DATABASE'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_54_count_result
+      changed_when: false
+      failed_when: false
+
+    # Paso 3: Procesar resultados
+    - name: (Check - CIS 54) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_54_count: "{{ cis_54_count_result.stdout | trim | int }}"
+        cis_54_detail_raw: "{{ cis_54_detail_result.stdout_lines | select('match', '.+,.+,.+,.+,.+') | list }}"
+        cis_54_expected_count: 0
+
+    # Paso 4: Estructurar datos de privilegios encontrados
+    - name: (Check - CIS 54) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_54_sensitive_privileges: []
+
+    # Paso 5: Estructurar datos de privilegios encontrados si existen
+    - name: (Check - CIS 54) - Estructurar datos en lista de dicts
+      ansible.builtin.set_fact:
+        cis_54_sensitive_privileges:
+          "{{ cis_54_sensitive_privileges | default([]) +
+          [{'grantee': priv_item.split(',')[0] | trim,
+          'privilege': priv_item.split(',')[1] | trim,
+          'admin_option': priv_item.split(',')[2] | trim,
+          'common': priv_item.split(',')[3] | trim,
+          'inherited': priv_item.split(',')[4] | trim}] }}"
+      loop: "{{ cis_54_detail_raw }}"
+      loop_control:
+        loop_var: priv_item
+      when: cis_54_detail_raw | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 54) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_54_compliant_initial: "{{ cis_54_count | int == 0 }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 54) - Mostrar resultados de Verificacion
+      ansible.builtin.debug:
+        msg:
+          - "Numero de privilegios AUDIT SYSTEM: {{ cis_54_count }}"
+          - "Privilegios encontrados: {{ cis_54_sensitive_privileges | length }}"
+          - "Estado de conformidad: {{ cis_54_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 54) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_54_needs_remediation: "{{ not cis_54_compliant_initial }}"
+        cis_54_compliant_final: "{{ cis_54_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_54_was_remediated: false
+
+    # Paso 9: Agregar resultados a lista global
+    - name: Agregar resultados de CIS 54 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_54] }}"
+      vars:
+        instance_result_cis_54:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_54:
+            parametro: "AUDIT SYSTEM"
+            description: Restringir la asignación de AUDIT SYSTEM
+            implementacion: |
+              Revisar los usuarios con privilegios "AUDIT SYSTEM" y restringirlos tanto como sea posible
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM.
+              <br> select * from dba_sys_privs where privilege ='AUDIT SYSTEM' and grantee not in
+              ('DBA','IMP_FULL_DATABASE','SYS', 'AUDIT_ADMIN','DATAPUMP_IMP_FULL_DATABASE');
+            remediacion: |
+              Revisar los usuarios con privilegios “AUDIT SYSTEM” y restringirlos tanto como sea posible.
+            nota: >-
+              Este control requiere remediación manual.
+            type: "security"
+            expected_count: "{{ cis_54_expected_count }}"
+            actual_count: "{{ cis_54_count }}"
+            sensitive_privileges: "{{ cis_54_sensitive_privileges }}"
+            compliant_initial: "{{ cis_54_compliant_initial }}"
+            compliant_final: "{{ cis_54_compliant_final }}"
+            needs_remediation: "{{ cis_54_needs_remediation }}"
+            was_remediated: "{{ cis_54_was_remediated }}"

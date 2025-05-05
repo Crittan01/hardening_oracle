@@ -1,0 +1,180 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_32.yml
+---
+- name: CIS 32 - Verificación de permisos del directorio de trazas Oracle Net Server
+  block:
+    # Paso 1: Determinar las rutas a verificar
+    - name: (Check - CIS 32) - Establecer ubicaciones a verificar
+      ansible.builtin.set_fact:
+        cis_32_trace_dir: "{{ hardening_oracle_home }}/network/trace"
+        cis_32_sqlnet_ora: "{{ hardening_oracle_home }}/network/admin/sqlnet.ora"
+        cis_32_expected_owner: "{{ hardening_current_user }}"
+        cis_32_expected_group: "dba"
+
+    # Paso 2: Verificar el directorio de trazas
+    - name: (Check - CIS 32) - Verificar directorio de trazas
+      ansible.builtin.stat:
+        path: "{{ cis_32_trace_dir }}"
+      register: cis_32_dir_stat
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Paso 3: Verificar si existe el archivo sqlnet.ora
+    - name: (Check - CIS 32) - Verificar si existe sqlnet.ora
+      ansible.builtin.stat:
+        path: "{{ cis_32_sqlnet_ora }}"
+      register: cis_32_sqlnet_stat
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Paso 4: Verificar el parámetro TRACE_LEVEL_CLIENT en sqlnet.ora si el archivo existe
+    - name: (Check - CIS 32) - Verificar TRACE_LEVEL_CLIENT en sqlnet.ora
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        grep -i "TRACE_LEVEL_CLIENT.*=.*Oracle" "{{ cis_32_sqlnet_ora }}" || echo "TRACE_LEVEL_CLIENT = Oracle no encontrado"
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_32_trace_result
+      changed_when: false
+      when: cis_32_sqlnet_stat.stat.exists | default(false)
+
+    # Paso 5: Procesar resultados del directorio
+    - name: (Check - CIS 32) - Procesar resultados del directorio
+      ansible.builtin.set_fact:
+        # Estado del directorio
+        cis_32_dir_exists: "{{ cis_32_dir_stat.stat.exists | default(false) }}"
+        cis_32_dir_mode: "{{ cis_32_dir_stat.stat.mode | default('N/A') }}"
+        cis_32_dir_owner: "{{ cis_32_dir_stat.stat.pw_name | default('N/A') }}"
+        cis_32_dir_group: "{{ cis_32_dir_stat.stat.gr_name | default('N/A') }}"
+        cis_32_public_perms: "{{ cis_32_dir_stat.stat.mode[-1:] | default('N/A') }}"
+
+    # Paso 6: Procesar resultados de sqlnet.ora
+    - name: (Check - CIS 32) - Procesar resultados de sqlnet.ora
+      ansible.builtin.set_fact:
+        cis_32_sqlnet_exists: "{{ cis_32_sqlnet_stat.stat.exists | default(false) }}"
+        cis_32_trace_configured:
+          "{{ 'TRACE_LEVEL_CLIENT = Oracle no encontrado' not in (cis_32_trace_result.stdout | default(''))
+          if cis_32_sqlnet_stat.stat.exists | default(false) else false }}"
+
+    # Paso 7: Determinar conformidad
+    - name: (Check - CIS 32) - Determinar conformidad
+      ansible.builtin.set_fact:
+        cis_32_dir_ok: "{{ cis_32_dir_exists and
+          cis_32_dir_owner == cis_32_expected_owner and
+          cis_32_dir_group == cis_32_expected_group and
+          cis_32_public_perms == '0' }}"
+        cis_32_compliant_initial: "{{ cis_32_dir_exists and
+          cis_32_dir_owner == cis_32_expected_owner and
+          cis_32_dir_group == cis_32_expected_group and
+          cis_32_public_perms == '0' and
+          cis_32_trace_configured }}"
+
+    # Paso 8: Mostrar resultados para depuración
+    - name: (Check - CIS 32) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Directorio: {{ cis_32_trace_dir }} - {{ 'Existe' if cis_32_dir_exists else 'No existe' }}"
+          - "Permisos: {{ cis_32_dir_mode }}"
+          - "Propietario: {{ cis_32_dir_owner }}"
+          - "Grupo: {{ cis_32_dir_group }}"
+          - "Permisos públicos: {{ cis_32_public_perms }}"
+          - "Archivo sqlnet.ora: {{ 'Existe' if cis_32_sqlnet_exists else 'No existe' }}"
+          - "TRACE_LEVEL_CLIENT=Oracle: {{ 'Configurado' if cis_32_trace_configured else 'No configurado' }}"
+          - "Estado de conformidad: {{ cis_32_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 9: Remediar si es necesario
+    - name: (Remediation - CIS 32) - Corregir configuración
+      when: not cis_32_compliant_initial
+      block:
+        # Paso 9.1: Crear o corregir el directorio de trazas
+        - name: (Remediation - CIS 32) - Crear/corregir directorio de trazas
+          ansible.builtin.file:
+            path: "{{ cis_32_trace_dir }}"
+            state: directory
+            owner: "{{ cis_32_expected_owner }}"
+            group: "{{ cis_32_expected_group }}"
+            mode: "0750" # Sin permisos públicos
+          become: true
+
+        # Paso 9.2: Configurar TRACE_LEVEL_CLIENT en sqlnet.ora
+        - name: (Remediation - CIS 32) - Configurar TRACE_LEVEL_CLIENT en sqlnet.ora
+          ansible.builtin.lineinfile:
+            path: "{{ cis_32_sqlnet_ora }}"
+            regexp: "^\\s*TRACE_LEVEL_CLIENT\\s*="
+            line: "TRACE_LEVEL_CLIENT = Oracle"
+            state: present
+            create: true
+            owner: "{{ cis_32_expected_owner }}"
+            group: "{{ cis_32_expected_group }}"
+            mode: "0640"
+          become: true
+
+        # Paso 9.3: Verificar resultado de la remediación
+        - name: (Remediation - CIS 32) - Verificar directorio remediado
+          ansible.builtin.stat:
+            path: "{{ cis_32_trace_dir }}"
+          register: cis_32_dir_remediated
+          become: true
+
+        # Paso 9.4: Marcar como remediado
+        - name: (Remediation - CIS 32) - Marcar como remediado
+          ansible.builtin.set_fact:
+            cis_32_was_remediated: true
+            cis_32_compliant_final: true
+            cis_32_remediated_mode: "{{ cis_32_dir_remediated.stat.mode }}"
+            cis_32_remediated_owner: "{{ cis_32_dir_remediated.stat.pw_name }}"
+            cis_32_remediated_group: "{{ cis_32_dir_remediated.stat.gr_name }}"
+
+    # Paso 10: Si no se requiere remediación
+    - name: (No Remediation - CIS 32) - Mantener estado actual
+      when: cis_32_compliant_initial
+      ansible.builtin.set_fact:
+        cis_32_was_remediated: false
+        cis_32_compliant_final: "{{ cis_32_compliant_initial }}"
+        cis_32_remediated_mode: "{{ cis_32_dir_mode }}"
+        cis_32_remediated_owner: "{{ cis_32_dir_owner }}"
+        cis_32_remediated_group: "{{ cis_32_dir_group }}"
+
+    # Paso 11: Agregar resultados a la lista global
+    - name: Agregar resultados de CIS 32 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_32] }}"
+      vars:
+        instance_result_cis_32:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_32:
+            parametro: "Oracle Net Server Trace Directory Permission"
+            description: "Asegura que el directorio de trazas del servidor es un directorio válido cuyo dueño es Oracle y no tiene permisos públicos"
+            implementacion: |
+              El directorio de trazas del servidor debe ser válido y con dueño Oracle y grupo dba sin permisos a public
+            verificacion: >-
+              Verificar que el directorio de trazas existe y tiene los permisos correctos.
+              Además, verificar que TRACE_LEVEL_CLIENT = Oracle en sqlnet.ora.
+            commando: |
+              ls -la $ORACLE_HOME/network/trace
+              cat $ORACLE_HOME/network/admin/sqlnet.ora | grep -i TRACE_LEVEL_CLIENT
+            remediacion: |
+              Corregir permisos del directorio:
+              chown -R oracle:dba $ORACLE_HOME/network/trace
+              chmod -R 750 $ORACLE_HOME/network/trace
+
+              Configurar en sqlnet.ora:
+              TRACE_LEVEL_CLIENT = Oracle
+            nota: >-
+              Un directorio de trazas con permisos incorrectos puede permitir a usuarios no autorizados
+              acceder a información sensible sobre la configuración y funcionamiento de Oracle.
+            type: "permission"
+            dir_path: "{{ cis_32_trace_dir }}"
+            dir_exists: "{{ cis_32_dir_exists }}"
+            dir_owner: "{{ cis_32_dir_owner }}"
+            dir_group: "{{ cis_32_dir_group }}"
+            dir_mode: "{{ cis_32_dir_mode }}"
+            public_perms: "{{ cis_32_public_perms }}"
+            sqlnet_exists: "{{ cis_32_sqlnet_exists }}"
+            trace_configured: "{{ cis_32_trace_configured }}"
+            dir_remediated_mode: "{{ cis_32_remediated_mode }}"
+            dir_remediated_owner: "{{ cis_32_remediated_owner }}"
+            dir_remediated_group: "{{ cis_32_remediated_group }}"
+            compliant_initial: "{{ cis_32_compliant_initial }}"
+            compliant_final: "{{ cis_32_compliant_final }}"
+            was_remediated: "{{ cis_32_was_remediated }}"

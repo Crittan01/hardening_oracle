@@ -1,0 +1,119 @@
+# roles/hardening/tasks/autenticacion/cis_47.yml
+---
+- name: CIS 47 - Verificación de restricción de acceso a los roles del sistema
+  block:
+    # Paso 1: Verificar accesos a roles y tablas del sistema (consulta detallada)
+    - name: (Check - CIS 47) - Verificar acceso detallado a roles del sistema
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select grantee, grantor, privilege , table_name from dba_tab_privs where table_name in ('DBA_ROLES','DBA_SYS_PRIVS','DBA_ROLE_PRIVS',
+        'DBA_TAB_PRIVS','DBA_USERS','ROLE_ROLE_PRIVS','SELECT_CATALOG_ROLE', 'EXECUTE_CATALOG_ROLE', 'DELETE_CATALOG_ROLE', 'RECOVERY_CATALOG_OWNER')
+        and grantee not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,'DIP',
+        'XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM'  ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,'ANONYMOUS','WMSYS',
+        'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF') ;
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_47_detail_result
+      changed_when: false
+
+    # Paso 2: Verificar conteo de accesos no autorizados
+    - name: (Check - CIS 47) - Contar accesos no autorizados a roles del sistema
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (('DBA_ROLES','DBA_SYS_PRIVS','DBA_ROLE_PRIVS', 'DBA_TAB_PRIVS','DBA_USERS','ROLE_ROLE_PRIVS','SELECT_CATALOG_ROLE',
+        'EXECUTE_CATALOG_ROLE', 'DELETE_CATALOG_ROLE', 'RECOVERY_CATALOG_OWNER') and grantee not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM',
+        'SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,'DIP','XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM'  ,'SYS','$UMF' ,
+        'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,'ANONYMOUS','WMSYS' ,'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,
+        'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_47_count_result
+      changed_when: false
+
+    # Paso 3: Procesar los resultados obtenidos
+    - name: (Check - CIS 47) - Procesar resultados de acceso a roles del sistema
+      ansible.builtin.set_fact:
+        cis_47_access_count: "{{ cis_47_count_result.stdout | trim | int }}"
+        cis_47_access_details: "{{ cis_47_detail_result.stdout }}"
+
+    # Paso 4: Determinar el estado de cumplimiento
+    - name: (Check - CIS 47) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_47_compliant_initial: "{{ (cis_47_access_count | int) == 0 }}"
+        cis_47_unauthorized_access: "{{ (cis_47_access_count | int) > 0 }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 47) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Número de accesos no autorizados detectados: {{ cis_47_access_count }}"
+          - "Estado de cumplimiento: {{ cis_47_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Establecer estado final (control informativo, no hay remediación automática)
+    - name: (Info - CIS 47) - Establecer estado final (control informativo)
+      ansible.builtin.set_fact:
+        cis_47_was_remediated: false
+        cis_47_compliant_final: "{{ cis_47_compliant_initial }}"
+        cis_47_remediation_notes: "Este control requiere revisión manual de los permisos asignados a usuarios no privilegiados."
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 47 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_47] }}"
+      vars:
+        instance_result_cis_47:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_47:
+            parametro: "Restringir el acceso a los roles del sistema"
+            description: "Restringir el acceso a roles y tablas del sistema críticas."
+            implementacion: |
+              Restringir el acceso a los siguientes roles del sistema:
+              * DBA_ROLES
+              * DBA_SYS_PRIVS
+              * DBA_ROLE_PRIVS
+              * DBA_TAB_PRIVS
+              * DBA_USERS
+              * ROLE_ROLE_PRIVS
+              * USER_TAB_PRIVS
+              * USER_ROLE_PRIVS
+              * SELECT_CATALOG_ROLE
+              * EXECUTE_CATALOG_ROLE
+              * DELETE_CATALOG_ROLE
+              * RECOVERY_CATALOG_OWNER
+              * NER
+
+              Retirar el acceso para todos los usuarios, excepto para las cuentas SYS y DBA.
+            verificacion: >-
+              Verificar la asignación de privilegios de cuentas y roles de usuario son asignadas a los usuarios: DBA, SYS y SYSTEM.
+            commando: |
+              <br>select grantee, grantor, privilege, table_name from dba_tab_privs where table_name in ('DBA_ROLES','DBA_SYS_PRIVS','DBA_ROLE_PRIVS',
+              'DBA_TAB_PRIVS','DBA_USERS','ROLE_ROLE_PRIVS','SELECT_CATALOG_ROLE', 'EXECUTE_CATALOG_ROLE', 'DELETE_CATALOG_ROLE', 'RECOVERY_CATALOG_OWNER')
+              and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN','DV_SECANALYST','DVSYS','CTXSYS','ORACLE_OCM',
+              'SELECT_CATALOG_ROLE','AUDIT_ADMIN','OLAP_XS_ADMIN','MDSYS');
+              <br>select count(*) valor from (select grantee, grantor, privilege, table_name from dba_tab_privs where table_name in ('DBA_ROLES',
+              'DBA_SYS_PRIVS','DBA_ROLE_PRIVS', 'DBA_TAB_PRIVS','DBA_USERS','ROLE_ROLE_PRIVS','SELECT_CATALOG_ROLE', 'EXECUTE_CATALOG_ROLE',
+              'DELETE_CATALOG_ROLE','RECOVERY_CATALOG_OWNER') and grantee not in ('SYS','SYSTEM','LBACSYS','OJVMSYS','XDB','GSMADMIN_INTERNAL','OUTLN',
+              'DV_SECANALYST','DVSYS','CTXSYS','ORACLE_OCM','SELECT_CATALOG_ROLE','AUDIT_ADMIN','OLAP_XS_ADMIN','MDSYS'));
+            nota: >-
+              <strong>Control informativo.</strong> La remediación debe realizarse manualmente para cada usuario no autorizado identificado.
+              Para revocar un privilegio, use: REVOKE [privilegio] ON [tabla] FROM [usuario];
+              Este control es considerado conforme si no se detectan accesos no autorizados (conteo = 0).
+            type: "authentication"
+            access_count: "{{ cis_47_access_count }}"
+            access_details: "{{ cis_47_access_details }}"
+            unauthorized_access: "{{ cis_47_unauthorized_access }}"
+            remediation_notes: "{{ cis_47_remediation_notes }}"
+            compliant_initial: "{{ cis_47_compliant_initial }}"
+            compliant_final: "{{ cis_47_compliant_final }}"
+            was_remediated: "{{ cis_47_was_remediated }}"

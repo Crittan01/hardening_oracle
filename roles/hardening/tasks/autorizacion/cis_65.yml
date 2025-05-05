@@ -1,0 +1,149 @@
+---
+- name: CIS 65 - Verificación de ifile
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 65) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_65_valid_pattern: "^ora[a-zA-Z0-9]{3,4}$"
+        cis_65_invalid_users: ["oracle"]
+        cis_65_explict_valid_users: ["grid"]
+        cis_65_valid_groups: ["dba", "oinstall", "asmdba"]
+        cis_65_instance_user_valid: "{{
+          hardening_current_user is match('^ora[a-zA-Z0-9]{3,4}$') and
+          hardening_current_user != 'oracle' or
+          hardening_current_user in ['grid'] }}"
+        cis_65_file_details: []
+
+    # Obtener valor actual de ifile
+    - name: (Check - CIS 65) - Obtener valor actual de ifile
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='ifile';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_65_ifile_result
+      changed_when: false
+
+    # Procesar el valor obtenido
+    - name: (Check - CIS 65) - Procesar valor de ifile
+      ansible.builtin.set_fact:
+        cis_65_ifile_value: "{{ cis_65_ifile_result.stdout | trim }}"
+        cis_65_ifile_is_empty: "{{ cis_65_ifile_result.stdout | trim == '' }}"
+        cis_65_has_file: "{{ cis_65_ifile_result.stdout | trim != '' }}"
+
+    # Verificar permisos del archivo si existe
+    - name: (Check - CIS 65) - Verificar permisos del archivo ifile
+      ansible.builtin.stat:
+        path: "{{ cis_65_ifile_value }}"
+        get_attributes: true
+      register: cis_65_file_stat
+      become: true
+      when: cis_65_has_file
+
+    # Procesar resultados del archivo
+    - name: (Check - CIS 65) - Procesar resultados del archivo
+      ansible.builtin.set_fact:
+        cis_65_file_details:
+          [
+            {
+              "path": "{{ cis_65_ifile_value }}",
+              "exists": "{{ cis_65_file_stat.stat.exists | default(false) }}",
+              "owner": '{{ cis_65_file_stat.stat.pw_name | default("N/A") }}',
+              "group": '{{ cis_65_file_stat.stat.gr_name | default("N/A") }}',
+              "mode": '{{ cis_65_file_stat.stat.mode | default("N/A") }}',
+              "owner_valid": "{{
+                cis_65_file_stat.stat.exists | default(false) and
+                cis_65_file_stat.stat.pw_name == hardening_current_user
+                }}",
+              "naming_valid": "{{
+                cis_65_file_stat.stat.exists | default(false) and
+                (cis_65_file_stat.stat.pw_name is match(cis_65_valid_pattern) and
+                cis_65_file_stat.stat.pw_name not in cis_65_invalid_users) or
+                cis_65_file_stat.stat.pw_name in cis_65_explict_valid_users
+                }}",
+              "group_valid": "{{
+                cis_65_file_stat.stat.exists | default(false) and
+                cis_65_file_stat.stat.gr_name in cis_65_valid_groups
+                }}",
+              "permission_valid": '{{
+                cis_65_file_stat.stat.exists | default(false) and
+                (cis_65_file_stat.stat.mode | regex_replace("^0", "") | int(base=8) <= 0o750)
+                }}',
+              "compliant": '{{
+                cis_65_file_stat is defined and
+                cis_65_file_stat.stat.exists and
+                cis_65_file_stat.stat.pw_name == hardening_current_user and
+                ((cis_65_file_stat.stat.pw_name is match(cis_65_valid_pattern) and
+                cis_65_file_stat.stat.pw_name not in cis_65_invalid_users) or
+                cis_65_file_stat.stat.pw_name in cis_65_explict_valid_users) and
+                cis_65_file_stat.stat.gr_name in cis_65_valid_groups and
+                (cis_65_file_stat.stat.mode | regex_replace("^0", "") | int(base=8) <= 0o750)
+                }}',
+            },
+          ]
+      when: cis_65_has_file and cis_65_file_stat is defined
+
+    # Determinar cumplimiento general
+    - name: (Check - CIS 65) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_65_file_compliant: "{{
+          cis_65_file_details | length > 0 and
+          cis_65_file_details[0].compliant }}"
+        cis_65_compliant_initial: "{{
+          cis_65_ifile_is_empty or
+          (cis_65_file_details | length > 0 and cis_65_file_details[0].compliant) }}"
+        cis_65_compliant_final: "{{
+          cis_65_ifile_is_empty or
+          (cis_65_file_details | length > 0 and cis_65_file_details[0].compliant) }}"
+        cis_65_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 65) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Instancia: {{ hardening_current_instance }}"
+          - "Valor ifile: '{{ cis_65_ifile_value }}'"
+          - "¿Está vacío?: {{ cis_65_ifile_is_empty }}"
+          - "Estado de cumplimiento: {{ cis_65_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_65] }}"
+      vars:
+        instance_result_cis_65:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_65:
+            parametro: "ifile"
+            description: "Debe ser fijado para limitar el uso externo de una cuenta a un usuario especificado como IDENTIFIED EXTERNALLY"
+            implementacion: |
+              El parámetro ifile debe estar vacío ("") o null. Si está configurado con una ruta,
+              el archivo debe pertenecer al usuario que ejecuta la instancia (debe seguir el patrón
+              'ora' + 3-4 caracteres o ser 'grid'), pertenecer a un grupo válido (dba, oinstall, asmdba)
+              y tener permisos 0750 o más restrictivos.
+            verificacion: >-
+              Verificar que el parámetro ifile esté vacío o que el archivo cumpla con los
+              requisitos de permisos y propiedad.
+            commando: |
+              SQL> select name, value, DECODE(Value,'','Cumple','Revisar') ESTADO from v$parameter where name='ifile';
+              SQL> show parameter ifile;
+            nota: "Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto."
+            type: "security"
+            ifile_value: "{{ cis_65_ifile_value | default('') }}"
+            ifile_is_empty: "{{ cis_65_ifile_is_empty }}"
+            has_file: "{{ cis_65_has_file }}"
+            file_details: "{{ cis_65_file_details }}"
+            file_compliant: "{{ cis_65_file_compliant | default(false) }}"
+            instance_user: "{{ hardening_current_user }}"
+            instance_user_valid: "{{ cis_65_instance_user_valid }}"
+            valid_pattern: "{{ cis_65_valid_pattern }}"
+            valid_groups: "{{ cis_65_valid_groups }}"
+            compliant_initial: "{{ cis_65_compliant_initial }}"
+            compliant_final: "{{ cis_65_compliant_final }}"
+            was_remediated: false

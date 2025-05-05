@@ -1,0 +1,127 @@
+# roles/hardening/tasks/autorizacion/cis_44.yml
+---
+- name: CIS 44 - Verificación de Tablespace Default
+  block:
+    # Paso 1: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 44) - Verificar usuarios con objetos en tablespace SYSTEM
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select owner, segment_type, segment_name, tablespace_name from dba_segments where tablespace_name='SYSTEM'
+        and owner not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,
+        'DIP' ,'XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM' ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,'ANONYMOUS',
+        'WMSYS' ,'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_44_count_result
+      changed_when: false
+
+    # Paso 2: Ejecutar la consulta detallada para obtener la lista de objetos no conformes
+    - name: (Check - CIS 44) - Obtener detalle de objetos no conformes en tablespace SYSTEM
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select owner || ',' || segment_type || ',' || segment_name || ',' || tablespace_name from dba_segments where tablespace_name='SYSTEM'
+        and owner not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,
+        'DIP' ,'XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM' ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,'ANONYMOUS',
+        'WMSYS' ,'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_44_detail_result
+      changed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 44) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_44_count: "{{ cis_44_count_result.stdout | trim | int }}"
+        cis_44_detail_raw: "{{ cis_44_detail_result.stdout_lines | select('match', '.+,.+,.+,.+') | list }}"
+        cis_44_expected_count: 0
+
+    - name: (Check - CIS 44) - Debug detallado
+      ansible.builtin.debug:
+        msg:
+          - "Valor como texto: '{{ cis_44_count_result.stdout }}'"
+          - "Valor después de trim: '{{ cis_44_count_result.stdout | trim }}'"
+          - "Valor como entero: {{ cis_44_count_result.stdout | trim | int }}"
+          - "¿Es igual a 0?: {{ (cis_44_count_result.stdout | trim | int) == 0 }}"
+        verbosity: 0
+
+    # Paso 4: Inicializar variables para evitar errores
+    - name: (Check - CIS 44) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_44_noncompliant_objects: []
+
+    # Paso 5: Estructurar datos de objetos no conformes
+    - name: (Check - CIS 44) - Estructurar datos de objetos no conformes
+      ansible.builtin.set_fact:
+        cis_44_noncompliant_objects:
+          "{{ cis_44_noncompliant_objects | default([]) +
+          [{'owner': object_item.split(',')[0] | trim,
+          'segment_type': object_item.split(',')[1] | trim,
+          'segment_name': object_item.split(',')[2] | trim,
+          'tablespace_name': object_item.split(',')[3] | trim}] }}"
+      loop: "{{ cis_44_detail_raw }}"
+      loop_control:
+        loop_var: object_item
+      when: cis_44_detail_raw | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 44) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_44_compliant_initial: "{{ cis_44_count | int == 0 }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 44) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de objetos no conformes: {{ cis_44_count }}"
+          - "Objetos encontrados: {{ cis_44_noncompliant_objects | length }}"
+          - "Estado de conformidad: {{ cis_44_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 44) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_44_needs_remediation: "{{ not cis_44_compliant_initial }}"
+        cis_44_compliant_final: "{{ cis_44_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_44_was_remediated: false
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 44 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_44] }}"
+      vars:
+        instance_result_cis_44:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_44:
+            parametro: "Tablespace Default"
+            description: "Únicamente SYS y SYSTEM debe tener permisos en el tablespace default."
+            implementacion: |
+              Retirar diferente a SYS y SYSTEM tenga objetos sobre el tablespace system
+            verificacion: >-
+              Para verificar usuarios con objetos en el tablespace SYSTEM, ejecute la siguiente sentencia:
+              <br>select count(*) valor from (select owner, segment_type, segment_name, tablespace_name from dba_segments where tablespace_name='SYSTEM'
+              and owner not in ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG' ,'AUDSYS','SYSKM','SYSRAC' ,'OUTLN','GSMADMIN_INTERNAL' ,'GSMUSER' ,'GSMROOTUSER' ,
+              'DIP' ,'XSNULL' ,'REMOTE_SCHEDULER_AGENT' ,'DBSFWUSER','ORACLE_OCM' ,'SYS','$UMF' ,'DBSNMP' ,'APPQOSSYS' ,'GSMCATUSER' ,'GGSYS' ,'XDB' ,
+              'ANONYMOUS','WMSYS' ,'OJVMSYS' ,'CTXSYS' ,'ORDSYS' ,'SI_INFORMTN_SCHEMA' ,'MDSYS','ORDPLUGINS' ,'ORDDATA' ,'OLAPSYS' ,'MDDATA','DVSYS' ,'DVF'));
+            remediacion: |
+              Retirar diferente a SYS y SYSTEM tenga objetos sobre el tablespace system
+            nota: >-
+              Este control requiere remediación manual. Los objetos que pertenecen a usuarios diferentes de
+              SYS y SYSTEM (excepto otros usuarios de sistema) deben ser movidos fuera del tablespace SYSTEM.
+            type: "security"
+            expected_count: "{{ cis_44_expected_count }}"
+            actual_count: "{{ cis_44_count }}"
+            noncompliant_objects: "{{ cis_44_noncompliant_objects }}"
+            compliant_initial: "{{ cis_44_compliant_initial }}"
+            compliant_final: "{{ cis_44_compliant_final }}"
+            needs_remediation: "{{ cis_44_needs_remediation }}"
+            was_remediated: "{{ cis_44_was_remediated }}"

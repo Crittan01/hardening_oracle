@@ -1,0 +1,104 @@
+# roles/hardening/tasks/seguridad_archivos/cis_60.yml
+---
+- name: CIS 60 - Verificación de permisos de archivos en $ORACLE_HOME (sin incluir bin)
+  block:
+    # Paso 1: Obtener la lista de archivos en $ORACLE_HOME excluyendo /bin
+    - name: (Check - CIS 60) - Obtener lista de archivos en $ORACLE_HOME (excluyendo bin)
+      ansible.builtin.find:
+        paths: "{{ hardening_oracle_home }}"
+        file_type: file
+        excludes: "bin/**,*/bin/**" # Excluir el directorio bin y sus contenidos
+        recurse: true
+      register: cis_60_oracle_files
+      become: true
+
+    # Paso 2: Inicializar listas para recopilar resultados
+    - name: (Check - CIS 60) - Inicializar variables para recopilar resultados
+      ansible.builtin.set_fact:
+        cis_60_valid_files: []
+        cis_60_invalid_files: []
+        cis_60_mode_summary: {}
+
+    # Paso 3: Verificar permisos de cada archivo usando stat
+    - name: (Check - CIS 60) - Verificar permisos de cada archivo
+      ansible.builtin.stat:
+        path: "{{ file_stat.path }}"
+        get_attributes: true
+      register: cis_60_file_stats
+      loop: "{{ cis_60_oracle_files.files }}"
+      loop_control:
+        loop_var: file_stat
+      become: true
+
+    # Paso 4: Procesar resultados y clasificar archivos por permisos
+    - name: (Check - CIS 60) - Procesar resultados de stat
+      ansible.builtin.set_fact:
+        # Un archivo es válido si su permiso numérico es <= 0750
+        # Para comparar, convertimos el modo a un entero octal
+        cis_60_valid_files: >-
+          {{ cis_60_valid_files + [file_stat.stat.path]
+             if file_stat.stat.mode | regex_replace('^0', '') | int(base=8) <= 0o750
+             else cis_60_valid_files }}
+        # Un archivo es inválido si su permiso numérico es > 0750
+        cis_60_invalid_files: >-
+          {{ cis_60_invalid_files + [{'path': file_stat.stat.path, 'mode': file_stat.stat.mode}]
+             if file_stat.stat.mode | regex_replace('^0', '') | int(base=8) > 0o750
+             else cis_60_invalid_files }}
+        # Actualizar el contador para cada modo único
+        cis_60_mode_summary: >-
+          {{ cis_60_mode_summary | combine({file_stat.stat.mode: (cis_60_mode_summary[file_stat.stat.mode] | default(0)) + 1}) }}
+      loop: "{{ cis_60_file_stats.results }}"
+      loop_control:
+        loop_var: file_stat
+
+    # Paso 5: Determinar si cumple (todos los archivos tienen permisos 0750 o inferiores)
+    - name: (Check - CIS 60) - Determinar cumplimiento
+      ansible.builtin.set_fact:
+        cis_60_invalid_count: "{{ cis_60_invalid_files | length }}"
+        cis_60_valid_count: "{{ cis_60_valid_files | length }}"
+        cis_60_total_count: "{{ cis_60_oracle_files.files | length }}"
+        cis_60_compliant_initial: "{{ cis_60_invalid_files | length == 0 }}"
+        cis_60_compliant_final: "{{ cis_60_invalid_files | length == 0 }}"
+        cis_60_was_remediated: false
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 60) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Total de archivos analizados en $ORACLE_HOME (excepto bin): {{ cis_60_total_count }}"
+          - "Archivos con permisos válidos (0750 o inferior): {{ cis_60_valid_count }}"
+          - "Archivos con permisos excesivos (>0750): {{ cis_60_invalid_count }}"
+          - "Resumen de permisos: {{ cis_60_mode_summary }}"
+          - "Estado de cumplimiento: {{ cis_60_compliant_initial }}"
+        verbosity: 1
+
+    # Paso 7: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 60 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_60] }}"
+      vars:
+        instance_result_cis_60:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_60:
+            parametro: "Archivos en $ORACLE_HOME (sin incluir bin)"
+            description: "Configure permisos 0750 o inferiores en sistemas Unix"
+            implementacion: |
+              Todos los archivos en $ORACLE_HOME deben tener permisos 0750 o inferiores, a excepción de $ORACLE_HOME/bin.
+            verificacion: >-
+              Todos los archivos en $ORACLE_HOME deben tener permisos 0750 o inferiores, a excepción de $ORACLE_HOME/bin.
+            objetivo: >-
+              Confirmar que los archivos en el directorio $ORACLE_HOME (excluyendo $ORACLE_HOME/bin) tienen permisos de 0750 o más restrictivos:
+              * Propietario: lectura, escritura y ejecución (7)
+              * Grupo: lectura y ejecución (5)
+              * Otros: sin permisos (0)
+            commando: |
+              find $ORACLE_HOME -type f -perm /027 | grep -v "$ORACLE_HOME/bin"
+            type: "filesystem"
+            total_count: "{{ cis_60_total_count }}"
+            valid_count: "{{ cis_60_valid_count }}"
+            mode_summary: "{{ cis_60_mode_summary }}"
+            invalid_files: "{{ cis_60_invalid_files }}"
+            invalid_count: "{{ cis_60_invalid_count }}"
+            compliant_initial: "{{ cis_60_compliant_initial }}"
+            compliant_final: "{{ cis_60_compliant_final }}"
+            was_remediated: "{{ cis_60_was_remediated }}"

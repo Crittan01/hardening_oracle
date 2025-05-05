@@ -1,0 +1,135 @@
+# roles/hardening/tasks/autenticacion/cis_39.yml
+---
+- name: CIS 39 - Verificación de Vigencia de contraseña
+  block:
+    # Paso 1: Ejecutar únicamente la consulta proporcionada en el instructivo
+    - name: (Check - CIS 39) - Verificar configuración de PASSWORD_LIFE_TIME
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        SELECT P.PROFILE || ',' || P.RESOURCE_NAME || ',' || P.LIMIT FROM DBA_PROFILES P
+        WHERE TO_NUMBER(DECODE(P.LIMIT, 'DEFAULT',(SELECT DISTINCT DECODE(LIMIT,'UNLIMITED',9999,LIMIT)
+        FROM DBA_PROFILES WHERE PROFILE='DEFAULT' AND RESOURCE_NAME='PASSWORD_LIFE_TIME'),
+        'UNLIMITED','9999',P.LIMIT)) > 45
+        AND P.RESOURCE_NAME = 'PASSWORD_LIFE_TIME'
+        AND EXISTS ( SELECT 'X' FROM DBA_USERS U WHERE U.PROFILE = P.PROFILE );
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_39_check_result
+      changed_when: false
+
+    # Paso 2: Procesar los resultados de la consulta
+    - name: (Check - CIS 39) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_39_noncompliant_profiles_raw: "{{ cis_39_check_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+        cis_39_expected_value: "45"
+
+    # Paso 3: Estructurar datos de perfiles no conformes
+    - name: (Check - CIS 39) - Estructurar datos de perfiles no conformes
+      ansible.builtin.set_fact:
+        cis_39_noncompliant_profiles:
+          "{{ cis_39_noncompliant_profiles | default([]) +
+          [{'profile': profile_item.split(',')[0] | trim,
+          'resource': profile_item.split(',')[1] | trim,
+          'limit': profile_item.split(',')[2] | trim}] }}"
+      loop: "{{ cis_39_noncompliant_profiles_raw }}"
+      loop_control:
+        loop_var: profile_item
+      when: cis_39_noncompliant_profiles_raw | length > 0
+
+    # Paso 4: Verificar si el perfil DEFAULT está entre los no conformes
+    - name: (Check - CIS 39) - Verificar si DEFAULT está entre los perfiles no conformes
+      ansible.builtin.set_fact:
+        cis_39_default_in_results: "{{ cis_39_noncompliant_profiles | default([]) | selectattr('profile', 'equalto', 'DEFAULT') | list | length > 0 }}"
+        cis_39_default_profile: "{{ cis_39_noncompliant_profiles | default([]) | selectattr('profile', 'equalto', 'DEFAULT') | first | default({}) }}"
+      when: cis_39_noncompliant_profiles is defined and cis_39_noncompliant_profiles | length > 0
+
+    # Paso 5: Determinar estado de conformidad
+    - name: (Check - CIS 39) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_39_compliant_initial: "{{ (cis_39_noncompliant_profiles_raw | default([])) | length == 0 }}"
+
+    # Paso 6: Mostrar resultados para depuración
+    - name: (Check - CIS 39) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de perfiles no conformes: {{ cis_39_noncompliant_profiles | default([]) | length }}"
+          - "¿Perfil DEFAULT no conforme?: {{ cis_39_default_in_results | default(false) }}"
+          - "Estado general de conformidad: {{ cis_39_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 7: Determinar si se requiere remediación
+    - name: (Check - CIS 39) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_39_needs_remediation: "{{ not cis_39_compliant_initial }}"
+
+    # Paso 8: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 39) - Configurar vigencia de contraseña
+      when: cis_39_needs_remediation
+      block:
+        # Paso 8.1: Remediar perfil DEFAULT primero (siempre, según instructivo)
+        - name: (Remediation - CIS 39) - Configurar PASSWORD_LIFE_TIME en perfil DEFAULT
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER PROFILE DEFAULT LIMIT PASSWORD_LIFE_TIME 45;
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_39_default_remediation
+          changed_when: "'Profile altered' in cis_39_default_remediation.stdout"
+
+        # Paso 8.2: Establecer estado después de la remediación
+        - name: (Remediation - CIS 39) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_39_compliant_final: true
+            cis_39_was_remediated: true
+            cis_39_requires_restart: false
+
+    # Paso 9: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 39) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_39_compliant_final: "{{ cis_39_compliant_initial }}"
+        cis_39_was_remediated: false
+        cis_39_requires_restart: false
+      when: not cis_39_needs_remediation | bool
+
+    # Paso 10: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 39 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_39] }}"
+      vars:
+        instance_result_cis_39:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_39:
+            parametro: "Vigencia de contraseña"
+            description: "Tiempo de vigencia de la contraseña"
+            implementacion: |
+              Para configurar en el profile Default, ejecute la siguiente sentencia:
+              Alter profile DEFAULT limit PASSWORD_LIFE_TIME 45;
+            verificacion: >-
+              Para verificar el estado del parámetro PASSWORD_LIFE_TIME, ejecute la siguiente sentencia:
+              SELECT P.PROFILE, P.RESOURCE_NAME, P.LIMIT FROM DBA_PROFILES P WHERE TO_NUMBER(DECODE(P.LIMIT, 'DEFAULT',(SELECT DISTINCT DECODE
+              (LIMIT,'UNLIMITED',9999,LIMIT) FROM DBA_PROFILES WHERE PROFILE='DEFAULT' AND RESOURCE_NAME='PASSWORD_LIFE_TIME'), 'UNLIMITED','9999',P.LIMIT))
+              > 45 AND P.RESOURCE_NAME = 'PASSWORD_LIFE_TIME' AND EXISTS ( SELECT 'X' FROM DBA_USERS U WHERE U.PROFILE = P.PROFILE );
+            remediacion: |
+              ALTER PROFILE DEFAULT LIMIT PASSWORD_LIFE_TIME 45;
+            nota: >-
+              Este límite hace que las contraseñas caduquen después de 45 días, obligando a los usuarios a cambiarlas.
+            type: "security"
+            expected_value: "{{ cis_39_expected_value }}"
+            noncompliant_profiles: "{{ cis_39_noncompliant_profiles | default([]) }}"
+            default_in_results: "{{ cis_39_default_in_results | default(false) }}"
+            default_profile_data: "{{ cis_39_default_profile | default({}) }}"
+            requires_restart: "{{ cis_39_requires_restart | default(false) }}"
+            compliant_initial: "{{ cis_39_compliant_initial }}"
+            compliant_final: "{{ cis_39_compliant_final }}"
+            was_remediated: "{{ cis_39_was_remediated }}"

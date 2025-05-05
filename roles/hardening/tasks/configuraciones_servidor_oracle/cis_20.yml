@@ -1,0 +1,118 @@
+# roles/hardening/tasks/configuraciones_servidor_oracle/cis_20.yml
+---
+- name: CIS 20 - Verificación de sec_return_server_release_banner
+  block:
+    # Paso 1: Verificar el valor actual del parámetro
+    - name: (Check - CIS 20) - Verificar valor actual de sec_return_server_release_banner
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select value from v\$parameter where name='sec_return_server_release_banner';
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_20_param_result
+      changed_when: false
+
+    # Paso 2: Procesar el valor obtenido
+    - name: (Check - CIS 20) - Procesar valor del parámetro
+      ansible.builtin.set_fact:
+        cis_20_param_value: "{{ cis_20_param_result.stdout | trim | upper }}"
+
+    # Paso 3: Establecer el valor esperado
+    - name: (Check - CIS 20) - Establecer valor esperado
+      ansible.builtin.set_fact:
+        cis_20_expected_value: "FALSE"
+
+    # Paso 4: Determinar el estado de cumplimiento inicial
+    - name: (Check - CIS 20) - Determinar estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_20_compliant_initial: "{{ cis_20_param_value == cis_20_expected_value }}"
+
+    # Paso 5: Mostrar resultados para depuración
+    - name: (Check - CIS 20) - Mostrar resultados iniciales
+      ansible.builtin.debug:
+        msg:
+          - "Valor actual de sec_return_server_release_banner: {{ cis_20_param_value }}"
+          - "Valor esperado: {{ cis_20_expected_value }}"
+          - "Estado de cumplimiento: {{ cis_20_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 6: Determinar si se requiere remediación
+    - name: (Check - CIS 20) - Determinar si se requiere remediación
+      ansible.builtin.set_fact:
+        cis_20_needs_remediation: "{{ not cis_20_compliant_initial }}"
+
+    # Paso 7: Bloque de remediación - Solo se ejecuta si se requiere remediación
+    - name: (Remediation - CIS 20) - Configurar sec_return_server_release_banner
+      when: cis_20_needs_remediation
+      block:
+        # Paso 7.1: Aplicar la remediación
+        - name: (Remediation - CIS 20) - Configurar sec_return_server_release_banner con el valor correcto
+          ansible.builtin.shell: |
+            . ~/.bash_profile
+            export ORACLE_SID={{ hardening_current_instance }}
+            sqlplus -s / as sysdba << EOF
+            {{ hardening_set_sqlplus }}
+            SET FEEDBACK ON
+            ALTER SYSTEM SET sec_return_server_release_banner=FALSE SCOPE=SPFILE SID='*';
+            EXIT;
+            EOF
+          become: true
+          become_user: "{{ hardening_current_user }}"
+          register: cis_20_remediation_result
+          changed_when: "'System altered' in cis_20_remediation_result.stdout"
+
+        # Paso 7.2: Verificar si se requiere reinicio
+        - name: (Remediation - CIS 20) - Indicar que se requiere reiniciar la instancia
+          ansible.builtin.debug:
+            msg: "Se ha modificado el parámetro sec_return_server_release_banner. Para la instancia {{ hardening_current_instance }}."
+
+        # Paso 7.3: Establecer que la remediación se ha aplicado
+        - name: (Remediation - CIS 20) - Establecer estado después de la remediación
+          ansible.builtin.set_fact:
+            cis_20_was_remediated: true
+            cis_20_compliant_final: true
+            cis_20_remediated_value: "{{ cis_20_expected_value }} (pendiente reinicio)"
+
+    # Paso 8: Establecer valores finales cuando no se requiere remediación
+    - name: (No Remediation Needed - CIS 20) - Establecer estado cuando no hay remediación
+      ansible.builtin.set_fact:
+        cis_20_was_remediated: false
+        cis_20_compliant_final: "{{ cis_20_compliant_initial }}"
+        cis_20_remediated_value: "{{ cis_20_param_value }}"
+      when: not cis_20_needs_remediation | bool
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 20 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_20] }}"
+      vars:
+        instance_result_cis_20:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_20:
+            parametro: "sec_return_server_release_banner"
+            description: "Verificar que la base de datos no retorna a los clientes información del motor. (Deshabilita banners)"
+            implementacion: |
+              Configurar el siguiente parámetro:
+              SEC_RETURN_SERVER_RELEASE_BANNER = false
+            verificacion: >-
+              Verificar la configuración establecida del parámetro mediante una consulta SQL
+              o examinando el archivo init.ora.
+            commando: |
+              SELECT name, value, DECODE(Value,'FALSE','Cumple','Revisar') ESTADO
+              FROM v$parameter
+              WHERE name='sec_return_server_release_banner';
+            remediacion: |
+              ALTER SYSTEM SET sec_return_server_release_banner=FALSE scope=spfile sid='*';
+            nota: Si fue remediado, <strong>se requiere reiniciar</strong> la instancia para que los cambios surtan efecto
+            type: "parameter"
+            param_value: "{{ cis_20_param_value }}"
+            expected_value: "{{ cis_20_expected_value }}"
+            remediated_value: "{{ cis_20_remediated_value | default(cis_20_param_value) }}"
+            compliant_initial: "{{ cis_20_compliant_initial }}"
+            compliant_final: "{{ cis_20_compliant_final }}"
+            was_remediated: "{{ cis_20_was_remediated }}"
