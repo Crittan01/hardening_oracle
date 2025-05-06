@@ -1,127 +1,119 @@
 ---
-- name: CIS 19 - Verificación de procedimientos externos en archivos de configuración
+- name: CIS 19 - Verificación de procedimientos externos en listener.ora y tnsnames.ora
   block:
-    # Paso 1: Definiciones y preparación
-    - name: (Check - CIS 19) - Definiciones iniciales
+    # Definiciones básicas
+    - name: (Check - CIS 19) - Definiciones y variables
       ansible.builtin.set_fact:
-        cis_19_config_files:
+        cis_19_files_to_check:
           - "{{ hardening_oracle_home }}/network/admin/listener.ora"
           - "{{ hardening_oracle_home }}/network/admin/tnsnames.ora"
-        cis_19_files_details: []
+        cis_19_search_pattern: "EXTPROC"
+        cis_19_file_details: []
         cis_19_non_compliant_files: []
+        cis_19_existing_files: []
 
-    # Paso 2: Verificar los archivos de configuración
-    - name: (Check - CIS 19) - Verificar archivos de configuración
+    # Verificar la existencia de los archivos a evaluar
+    - name: (Check - CIS 19) - Verificar existencia de archivo listener.ora
       ansible.builtin.stat:
-        path: "{{ item }}"
-      register: cis_19_file_stats
-      with_items: "{{ cis_19_config_files }}"
+        path: "{{ hardening_oracle_home }}/network/admin/listener.ora"
+      register: cis_19_listener_stat
       become: true
       become_user: "{{ hardening_current_user }}"
 
-    # Paso 3: Buscar entradas EXTPROC activas en los archivos existentes
-    - name: (Check - CIS 19) - Buscar EXTPROC en archivos
+    - name: (Check - CIS 19) - Verificar existencia de archivo tnsnames.ora
+      ansible.builtin.stat:
+        path: "{{ hardening_oracle_home }}/network/admin/tnsnames.ora"
+      register: cis_19_tnsnames_stat
+      become: true
+      become_user: "{{ hardening_current_user }}"
+
+    # Crear lista de archivos existentes
+    - name: (Check - CIS 19) - Agregar listener.ora a lista si existe
+      ansible.builtin.set_fact:
+        cis_19_existing_files: "{{ cis_19_existing_files + ['{{ hardening_oracle_home }}/network/admin/listener.ora'] }}"
+      when: cis_19_listener_stat.stat.exists | default(false)
+
+    - name: (Check - CIS 19) - Agregar tnsnames.ora a lista si existe
+      ansible.builtin.set_fact:
+        cis_19_existing_files: "{{ cis_19_existing_files + ['{{ hardening_oracle_home }}/network/admin/tnsnames.ora'] }}"
+      when: cis_19_tnsnames_stat.stat.exists | default(false)
+
+    # Buscar procedimientos externos en listener.ora
+    - name: (Check - CIS 19) - Buscar EXTPROC en listener.ora
       ansible.builtin.shell: |
-        grep -v '^[[:space:]]*#' {{ item.stat.path }} | grep -i EXTPROC || true
-      register: cis_19_grep_result
-      with_items: "{{ cis_19_file_stats.results | selectattr('stat.exists', 'true') | list }}"
+        set -o pipefail
+        grep -n "{{ cis_19_search_pattern }}" "{{ hardening_oracle_home }}/network/admin/listener.ora" | grep -v "^#" || echo ""
+      register: cis_19_listener_result
       changed_when: false
       failed_when: false
       become: true
       become_user: "{{ hardening_current_user }}"
-      when: item.stat.exists | default(false)
+      when: cis_19_listener_stat.stat.exists | default(false)
 
-    # Paso 4: Construir detalles de los archivos
-    - name: (Check - CIS 19) - Procesar resultados
+    # Buscar procedimientos externos en tnsnames.ora
+    - name: (Check - CIS 19) - Buscar EXTPROC en tnsnames.ora
+      ansible.builtin.shell: |
+        set -o pipefail
+        grep -n "{{ cis_19_search_pattern }}" "{{ hardening_oracle_home }}/network/admin/tnsnames.ora" | grep -v "^#" || echo ""
+      register: cis_19_tnsnames_result
+      changed_when: false
+      failed_when: false
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      when: cis_19_tnsnames_stat.stat.exists | default(false)
+
+    # Procesar resultado de listener.ora
+    - name: (Check - CIS 19) - Procesar resultado de listener.ora
       ansible.builtin.set_fact:
-        cis_19_files_details: "{{ cis_19_files_details | default([]) + [file_info] }}"
-        cis_19_non_compliant_files: "{{ cis_19_non_compliant_files | default([]) + [file_path] if extproc_found else cis_19_non_compliant_files | default([]) }}"
-      vars:
-        file_stat: "{{ cis_19_file_stats.results[idx] }}"
-        file_path: "{{ file_stat.stat.path }}"
-        grep_idx: "{{ (cis_19_file_stats.results[:idx] | selectattr('stat.exists', 'true') | list | length) }}"
-        grep_result: "{{ cis_19_grep_result.results[grep_idx] if grep_idx < (cis_19_grep_result.results | length) else {'stdout_lines': []} }}"
-        extproc_found: "{{ file_stat.stat.exists and grep_idx < (cis_19_grep_result.results | length) and grep_result.stdout_lines | length > 0 }}"
-        file_info:
-          {
-            "path": "{{ file_path }}",
-            "filename": "{{ file_path | basename }}",
-            "exists": "{{ file_stat.stat.exists | default(false) }}",
-            "extproc_lines": "{{ grep_result.stdout_lines | default([]) if extproc_found else [] }}",
-            "is_compliant": "{{ not extproc_found }}",
-          }
-      loop: "{{ range(0, cis_19_file_stats.results | length) | list }}"
-      loop_control:
-        loop_var: idx
-      when: cis_19_file_stats.results[idx].stat.exists | default(false)
+        cis_19_listener_entries: "{{ cis_19_listener_result.stdout.split('\n') | select('regex', '\\S') | list }}"
+        cis_19_file_details: "{{ cis_19_file_details + [{
+          'path': hardening_oracle_home + '/network/admin/listener.ora',
+          'filename': 'listener.ora',
+          'extproc_entries': cis_19_listener_result.stdout.split('\n')
+          | select('regex', '\\S') | list, 'entry_count': (cis_19_listener_result.stdout.split('\n')
+          | select('regex', '\\S') | list | length), 'compliant': (cis_19_listener_result.stdout.split('\n')
+          | select('regex', '\\S') | list | length) == 0}] }}"
+      when: cis_19_listener_stat.stat.exists | default(false)
 
-    # Paso 5: Determinar estado general de cumplimiento
+    # Procesar resultado de tnsnames.ora
+    - name: (Check - CIS 19) - Procesar resultado de tnsnames.ora
+      ansible.builtin.set_fact:
+        cis_19_tnsnames_entries: "{{ cis_19_tnsnames_result.stdout.split('\n') | select('regex', '\\S') | list }}"
+        cis_19_file_details: "{{ cis_19_file_details + [{
+          'path': hardening_oracle_home + '/network/admin/tnsnames.ora',
+          'filename': 'tnsnames.ora', 'extproc_entries': cis_19_tnsnames_result.stdout.split('\n')
+          | select('regex', '\\S') | list, 'entry_count': (cis_19_tnsnames_result.stdout.split('\n')
+          | select('regex', '\\S') | list | length), 'compliant': (cis_19_tnsnames_result.stdout.split('\n')
+          | select('regex', '\\S') | list | length) == 0}] }}"
+      when: cis_19_tnsnames_stat.stat.exists | default(false)
+
+    # Identificar archivos no conformes
+    - name: (Check - CIS 19) - Identificar archivos no conformes
+      ansible.builtin.set_fact:
+        cis_19_non_compliant_files: "{{ cis_19_non_compliant_files + [file_item] }}"
+      loop: "{{ cis_19_file_details }}"
+      loop_control:
+        loop_var: file_item
+      when: file_item.entry_count > 0
+
+    # Establecer estado general
     - name: (Check - CIS 19) - Establecer estado general
       ansible.builtin.set_fact:
-        cis_19_compliant_initial: "{{ cis_19_non_compliant_files | default([]) | length == 0 }}"
-        cis_19_compliant_final: "{{ cis_19_non_compliant_files | default([]) | length == 0 }}"
+        cis_19_compliant_initial: "{{ cis_19_non_compliant_files | length == 0 }}"
+        cis_19_compliant_final: "{{ cis_19_non_compliant_files | length == 0 }}"
         cis_19_was_remediated: false
 
-    # Paso 6: Remediación (si es necesario)
-    - name: (Remediation - CIS 19) - Comentar entradas EXTPROC
-      when: not cis_19_compliant_initial
-      block:
-        # Crear backup de los archivos
-        - name: (Remediation - CIS 19) - Crear backup de archivos
-          ansible.builtin.copy:
-            src: "{{ item }}"
-            dest: "{{ item }}.{{ ansible_date_time.date }}"
-            remote_src: true
-            mode: preserve
-          with_items: "{{ cis_19_non_compliant_files }}"
-          become: true
-          become_user: "{{ hardening_current_user }}"
-
-        # Comentar líneas con EXTPROC
-        - name: (Remediation - CIS 19) - Comentar líneas con EXTPROC
-          ansible.builtin.shell: |
-            sed -i 's/^\([[:space:]]*\)\(.*EXTPROC.*\)$/\1#\2/' {{ item }}
-          with_items: "{{ cis_19_non_compliant_files }}"
-          register: cis_19_remediation
-          become: true
-          become_user: "{{ hardening_current_user }}"
-
-        # Verificar remediación
-        - name: (Remediation - CIS 19) - Verificar remediación
-          ansible.builtin.shell: |
-            grep -v '^[[:space:]]*#' {{ item }} | grep -i EXTPROC || true
-          register: cis_19_verify
-          with_items: "{{ cis_19_non_compliant_files }}"
-          changed_when: false
-          failed_when: false
-          become: true
-          become_user: "{{ hardening_current_user }}"
-
-        # Evaluar resultado final
-        - name: (Remediation - CIS 19) - Evaluar resultado
-          ansible.builtin.set_fact:
-            cis_19_failed_remediations: "{{ (cis_19_failed_remediations | default([]) + [item.item]) if item.stdout_lines | length > 0 else cis_19_failed_remediations | default([]) }}"
-          with_items: "{{ cis_19_verify.results }}"
-
-        # Actualizar estado final
-        - name: (Remediation - CIS 19) - Actualizar estado final
-          ansible.builtin.set_fact:
-            cis_19_compliant_final: "{{ (cis_19_failed_remediations | default([])) | length == 0 }}"
-            cis_19_was_remediated: true
-            cis_19_non_compliant_files: "{{ cis_19_failed_remediations | default([]) }}"
-            cis_19_files_details: "{{ cis_19_files_details | map('combine', {'extproc_lines': [], 'is_compliant': true, 'was_remediated': true}) | list }}"
-
-    # Paso 7: Resumen de resultados
+    # Mostrar resultados para depuración
     - name: (Check - CIS 19) - Mostrar resultados
       ansible.builtin.debug:
         msg:
-          - "Archivos analizados: {{ cis_19_config_files | length }}"
-          - "Archivos con EXTPROC inicialmente: {{ cis_19_non_compliant_files | default([]) | length }}"
-          - "Estado inicial: {{ 'Conforme' if cis_19_compliant_initial else 'No Conforme' }}"
-          - "Estado final: {{ 'Conforme' if cis_19_compliant_final else 'No Conforme' }}"
-          - "Remediación aplicada: {{ cis_19_was_remediated }}"
+          - "Instancia: {{ hardening_current_instance }}"
+          - "Archivos evaluados: {{ cis_19_file_details | map(attribute='filename') | list }}"
+          - "Archivos no conformes: {{ cis_19_non_compliant_files | map(attribute='filename') | list }}"
+          - "Estado de cumplimiento: {{ cis_19_compliant_initial }}"
+        verbosity: 1
 
-    # Paso 8: Agregar resultados a la lista global
+    # Agregar resultados a la lista global
     - name: Agregar resultados a la lista global
       ansible.builtin.set_fact:
         instances_results: "{{ instances_results | default([]) + [instance_result_cis_19] }}"
@@ -129,26 +121,30 @@
         instance_result_cis_19:
           instance_name: "{{ hardening_current_instance }}"
           cis_19:
-            parametro: "Procedimientos externos en archivos de configuración"
-            description: "Deshabilitar los procedimientos externos (EXTPROC) en listener.ora y tnsnames.ora"
+            parametro: "listener.ora, tnsnames.ora - Procedimientos externos"
+            description: "Remover las entradas para los procedimientos externos en los archivos listener.ora y tnsnames.ora"
             implementacion: |
-              Los procedimientos externos deben ser deshabilitados comentando todas las líneas
-              que contengan "EXTPROC" en los archivos listener.ora y tnsnames.ora.
+              Comentar o eliminar las entradas que contengan EXTPROC en los archivos
+              listener.ora y tnsnames.ora para evitar la ejecución de procedimientos externos
+              no autorizados.
             verificacion: >-
-              Verificar que no existan líneas sin comentar que contengan "EXTPROC".
+              Verificar que NO exista ninguna línea activa (no comentada) que contenga el texto 'EXTPROC'
+              en los archivos listener.ora y tnsnames.ora.
             objetivo: >-
-              Reducir la superficie de ataque deshabilitando la capacidad de ejecutar
-              procedimientos externos desde la base de datos.
+              Comentar posibles entradas de procedimientos externos que puedan representar un riesgo de
+              seguridad, limitando la capacidad de llamar a librerías compartidas desde fuera del
+              entorno controlado de Oracle.
             commando: |
-              grep -v '^#' $ORACLE_HOME/network/admin/listener.ora | grep -i EXTPROC
-              grep -v '^#' $ORACLE_HOME/network/admin/tnsnames.ora | grep -i EXTPROC
-            remediacion: |
-              # Comentar todas las líneas con EXTPROC
-              # Antes: (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
-              # Después: #(ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
+              grep EXTPROC $ORACLE_HOME/network/admin/listener.ora | grep -v "^#"
+              grep EXTPROC $ORACLE_HOME/network/admin/tnsnames.ora | grep -v "^#"
+            nota: >-
+              Los procedimientos externos pueden llamar librerías compartidas en el sistema que se encuentren
+              en la ruta $ORACLE_HOME/lib o $ORACLE_HOME/bin, lo que podría representar un riesgo de seguridad
+              si no está adecuadamente controlado.
             type: "configuration"
-            files_details: "{{ cis_19_files_details }}"
-            non_compliant_files: "{{ cis_19_non_compliant_files | default([]) }}"
+            files_checked: "{{ cis_19_file_details | map(attribute='filename') | list }}"
+            file_details: "{{ cis_19_file_details }}"
+            non_compliant_files: "{{ cis_19_non_compliant_files }}"
             compliant_initial: "{{ cis_19_compliant_initial }}"
             compliant_final: "{{ cis_19_compliant_final }}"
-            was_remediated: "{{ cis_19_was_remediated }}"
+            was_remediated: false

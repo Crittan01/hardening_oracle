@@ -2271,11 +2271,8 @@
                     </div>
                     {% endif %}
 
-                    <!-- CIS 19 - Procedimientos externos en archivos de configuración -->
+                    <!-- CIS 19 - Procedimientos externos en listener.ora y tnsnames.ora -->
                     {% if instance_data.cis_19 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -2292,58 +2289,65 @@
                                 {{ instance_data.cis_19.implementacion }}
                             </p>
                             
-                            <p><strong>Objetivo:</strong> {{ instance_data.cis_19.objetivo }}</p>
                             <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
                             
                             <h4>Estado de archivos de configuración</h4>
                             <table>
                                 <tr>
                                     <th>Archivo</th>
-                                    <th>Existe</th>
+                                    <th>Entradas EXTPROC</th>
                                     <th>Estado</th>
                                     <th>Problemas</th>
                                 </tr>
-                                {% for file in instance_data.cis_19.files_details %}
-                                <tr class="{{ 'pass' if file.is_compliant else 'fail' }}">
+                                {% for file in instance_data.cis_19.file_details %}
+                                <tr class="{{ 'pass' if file.compliant else 'fail' }}">
                                     <td>{{ file.filename }}</td>
-                                    <td>{{ 'Sí' if file.exists else 'No' }}</td>
-                                    <td>{{ 'Conforme' if file.is_compliant else 'No Conforme' }}</td>
+                                    <td>{{ file.entry_count }}</td>
+                                    <td>{{ 'Conforme' if file.compliant else 'No Conforme' }}</td>
                                     <td>
-                                        {% if not file.is_compliant %}
-                                        <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c; margin: 0;">
-                                            <p><strong>Líneas con EXTPROC no comentadas:</strong></p>
-                                            <pre style="margin: 5px 0; white-space: pre-wrap; word-break: break-word;">{% for line in file.extproc_lines %}{{ line }}
-                    {% endfor %}</pre>
-                                        </div>
-                                        {% else %}
-                                            {% if not file.exists %}
-                                                <span class="status-indicator status-info">Archivo no encontrado</span>
-                                            {% else %}
-                                                <span class="status-indicator status-success">No se encontraron líneas EXTPROC</span>
+                                        {% if not file.compliant %}
+                                        <ul style="margin: 0; padding-left: 20px;">
+                                            <li>Contiene entradas de procedimientos externos (EXTPROC) no comentadas</li>
+                                            {% if file.extproc_entries|length > 0 %}
+                                            <li>
+                                                <details>
+                                                    <summary>Ver líneas: ({{ file.extproc_entries|length }})</summary>
+                                                    <pre>{{ file.extproc_entries|join('\n') }}</pre>
+                                                </details>
+                                            </li>
                                             {% endif %}
+                                        </ul>
+                                        {% else %}
+                                        <span>NO contiene entradas de procedimientos externos (EXTPROC)</span>
                                         {% endif %}
                                     </td>
                                 </tr>
                                 {% endfor %}
                             </table>
                             
-                            {% if not instance_data.cis_19.compliant_initial and instance_data.cis_19.non_compliant_files|length > 0 %}
+                            {% if not instance_data.cis_19.compliant_initial %}
                             <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
                                 <p><strong>Acción recomendada:</strong></p>
-                                <p>Comentar las líneas que contienen EXTPROC en los archivos de configuración:</p>
+                                <p>Para cada archivo que contiene entradas EXTPROC, comente las líneas agregando # al principio:</p>
+                                {% for file in instance_data.cis_19.non_compliant_files %}
                                 <pre>
-                    # Para cada archivo (listener.ora y tnsnames.ora):
-                    # Buscar líneas que contengan EXTPROC y comentarlas añadiendo # al inicio
-                    # Ejemplo:
-                    # Original: (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
-                    # Remediado: #(ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
-                                </pre>
+                    # Editar el archivo {{ file.path }}
+                    $ vi {{ file.path }}
+
+                    # Comentar cada línea con el término EXTPROC agregando # al principio de cada línea
+                    # Por ejemplo, cambiar:
+                    #   (PROGRAM = EXTPROC)
+                    # Por:
+                    #   # (PROGRAM = EXTPROC)
+                    </pre>
+                                {% endfor %}
                             </div>
                             {% endif %}
                             
                             <div class="info-box">
+                                <p><strong>Objetivo:</strong> {{ instance_data.cis_19.objetivo }}</p>
                                 <p><strong>Verificación:</strong> {{ instance_data.cis_19.verificacion }}</p>
-                                <p><strong>Comando:</strong> {{ instance_data.cis_19.commando }}</p>
+                                <p><strong>Nota:</strong> {{ instance_data.cis_19.nota }}</p>
                             </div>
                         </div>
                     </div>
@@ -6919,11 +6923,8 @@
                     </div>
                     {% endif %}
 
-                    <!-- CIS 19 - Procedimientos externos en archivos de configuración -->
+                    <!-- CIS 19 - Procedimientos externos en listener.ora y tnsnames.ora -->
                     {% if instance_data.cis_19 is defined %}
-                    {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-                    {% set instance_home = reporte_instances_info[instance].home | default('/u01/app/oracle/product/19.0.0/dbhome_1') %}
-
                     <div class="control-box">
                         <div class="control-header">
                             <h3 class="control-title">
@@ -6941,35 +6942,21 @@
                             <table>
                                 <tr>
                                     <th>Archivo</th>
-                                    <th>Existe</th>
+                                    <th>Entradas EXTPROC</th>
                                     <th>Estado</th>
-                                    <th>Remediación</th>
                                 </tr>
-                                {% for file in instance_data.cis_19.files_details %}
-                                <tr class="{{ 'pass' if file.is_compliant else 'fail' }}">
+                                {% for file in instance_data.cis_19.file_details %}
+                                <tr class="{{ 'pass' if file.compliant else 'fail' }}">
                                     <td>{{ file.filename }}</td>
-                                    <td>{{ 'Sí' if file.exists else 'No' }}</td>
-                                    <td>{{ 'Conforme' if file.is_compliant else 'No Conforme' }}</td>
-                                    <td>
-                                        {% if file.was_remediated is defined and file.was_remediated %}
-                                            <span class="status-indicator status-success">✓ Remediado (líneas EXTPROC comentadas)</span>
-                                        {% elif file.is_compliant %}
-                                            {% if not file.exists %}
-                                                <span class="status-indicator status-info">No aplica (archivo no existe)</span>
-                                            {% else %}
-                                                <span class="status-indicator status-neutral">Ya conforme</span>
-                                            {% endif %}
-                                        {% else %}
-                                            <span class="status-indicator status-danger">No se pudo remediar</span>
-                                        {% endif %}
-                                    </td>
+                                    <td>{{ file.entry_count }}</td>
+                                    <td>{{ 'Conforme' if file.compliant else 'No Conforme' }}</td>
                                 </tr>
                                 {% endfor %}
                             </table>
                             
                             {% if not instance_data.cis_19.compliant_final %}
                             <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
-                                <p><strong>Atención:</strong> Aún existen líneas EXTPROC no comentadas en algunos archivos. Este control puede requerir remediación manual.</p>
+                                <p><strong>Atención:</strong> Este control requiere remediación manual. Debe comentar o eliminar las entradas de procedimientos externos (EXTPROC) en los archivos de configuración.</p>
                             </div>
                             {% endif %}
                         </div>
@@ -10617,7 +10604,7 @@
                         </tr>
                         {% endif %}
 
-                        <!-- CIS 19 - Procedimientos externos en archivos de configuración -->
+                        <!-- CIS 19 - Procedimientos externos en listener.ora y tnsnames.ora -->
                         {% if instance_data.cis_19 is defined %}
                         {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
 
@@ -10631,21 +10618,21 @@
                                 {% if instance_data.cis_19.compliant_initial %}
                                     Conforme
                                 {% else %}
-                                    No Conforme ({{ instance_data.cis_19.non_compliant_files | length }} archivos con EXTPROC)
+                                    No Conforme 
+                                    ({{ instance_data.cis_19.non_compliant_files | length }} {{ "archivo" if instance_data.cis_19.non_compliant_files | length == 1 else "archivos" }} con entradas EXTPROC)
                                 {% endif %}
                             </td>
                             <td class="{{ 'pass' if instance_data.cis_19.compliant_final else 'fail' }}">
                                 {% if instance_data.cis_19.compliant_final %}
                                     Conforme
                                 {% else %}
-                                    No Conforme ({{ instance_data.cis_19.non_compliant_files | length }} archivos con EXTPROC)
+                                    No Conforme
+                                    ({{ instance_data.cis_19.non_compliant_files | length }} {{ "archivo" if instance_data.cis_19.non_compliant_files | length == 1 else "archivos" }} con entradas EXTPROC)
                                 {% endif %}
                             </td>
                             <td>
-                                {% if instance_data.cis_19.was_remediated and instance_data.cis_19.compliant_final %}
+                                {% if instance_data.cis_19.was_remediated %}
                                     <span class="change-indicator positive">✓ Remediado</span>
-                                {% elif instance_data.cis_19.was_remediated and not instance_data.cis_19.compliant_final %}
-                                    <span class="change-indicator warning">Remedición parcial</span>
                                 {% elif instance_data.cis_19.compliant_initial and instance_data.cis_19.compliant_final %}
                                     <span class="change-indicator neutral">Ya conforme</span>
                                 {% elif not instance_data.cis_19.compliant_initial and not instance_data.cis_19.compliant_final %}
