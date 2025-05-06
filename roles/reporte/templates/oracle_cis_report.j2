@@ -6207,15 +6207,49 @@
                             
                             <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
                             
-                            <h4>Privilegios PUBLIC sobre paquetes UTL</h4>
-                            {% if instance_data.cis_80.public_privileges_initial | length > 0 %}
+                            <h4>Resultados de la consulta</h4>
+                            <div class="info-box">
+                                <p><strong>Consulta ejecutada:</strong></p>
+                                <pre>select owner, grantor, privilege, grantee, table_name from dba_tab_privs where table_name in ('UTL_HTTP','UTL_TCP','UTL_SMTP');</pre>
+                            </div>
+                            
+                            <h4>Todos los privilegios en paquetes UTL</h4>
+                            {% if instance_data.cis_80.all_privileges_initial | length > 0 %}
                             <table>
+                                <tr>
+                                    <th>Paquete</th>
+                                    <th>Privilegio</th>
+                                    <th>Otorgado a</th>
+                                    <th>Propietario</th>
+                                    <th>Otorgante</th>
+                                    <th>Estado</th>
+                                </tr>
+                                {% for priv in instance_data.cis_80.all_privileges_initial %}
+                                <tr class="{{ 'fail' if priv.grantee == 'PUBLIC' else 'info' }}">
+                                    <td>{{ priv.table_name }}</td>
+                                    <td>{{ priv.privilege }}</td>
+                                    <td>{{ priv.grantee }}</td>
+                                    <td>{{ priv.owner }}</td>
+                                    <td>{{ priv.grantor }}</td>
+                                    <td>{% if priv.grantee == 'PUBLIC' %}No Conforme{% else %}Conforme{% endif %}</td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                            {% else %}
+                            <div class="info-box">
+                                <p>No se encontraron privilegios sobre los paquetes UTL_HTTP, UTL_TCP o UTL_SMTP.</p>
+                            </div>
+                            {% endif %}
+
+                            {% if instance_data.cis_80.public_privileges_initial | length > 0 %}
+{#
+                           <h4>Privilegios PUBLIC detectados</h4>
+                           <table>
                                 <tr>
                                     <th>Paquete</th>
                                     <th>Privilegio</th>
                                     <th>Propietario</th>
                                     <th>Otorgante</th>
-                                    <th>Estado</th>
                                 </tr>
                                 {% for priv in instance_data.cis_80.public_privileges_initial %}
                                 <tr class="fail">
@@ -6223,11 +6257,10 @@
                                     <td>{{ priv.privilege }}</td>
                                     <td>{{ priv.owner }}</td>
                                     <td>{{ priv.grantor }}</td>
-                                    <td>No Conforme</td>
                                 </tr>
                                 {% endfor %}
                             </table>
-                            
+
                             <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
                                 <p><strong>Riesgo de seguridad:</strong> Los privilegios PUBLIC sobre estos paquetes permiten a cualquier usuario:</p>
                                 <ul>
@@ -6237,12 +6270,12 @@
                                 </ul>
                                 <p>Esto podría facilitar la exfiltración de datos, ataques de denegación de servicio o el uso de la base de datos como vector de ataque.</p>
                             </div>
-                            
+#}                            
                             <div class="info-box">
                                 <p><strong>Remediación recomendada:</strong></p>
                                 <pre>
                     -- Revocar privilegios PUBLIC
-                    {{ instance_data.cis_80.implementacion }}
+                    {{ instance_data.cis_80.remediation_commands }}
                                 </pre>
                             </div>
                             {% else %}
@@ -6250,10 +6283,6 @@
                                 <p><strong>Estado correcto:</strong> No se han detectado privilegios PUBLIC sobre los paquetes UTL_HTTP, UTL_TCP o UTL_SMTP.</p>
                             </div>
                             {% endif %}
-                            
-                            <div class="info-box">
-                                <p><strong>Verificación:</strong> {{ instance_data.cis_80.verificacion }}</p>
-                            </div>
                         </div>
                     </div>
                     {% endif %}
@@ -10372,24 +10401,59 @@
                         <div class="control-body">
                             <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
                             
-                            <h4>Estado después de remediación</h4>
+                            <h4>Resultados después de la verificación</h4>
+                            <div class="info-box">
+                                <p><strong>Consulta ejecutada:</strong></p>
+                                <pre>select owner, grantor, privilege, grantee, table_name from dba_tab_privs where table_name in ('UTL_HTTP','UTL_TCP','UTL_SMTP');</pre>
+                            </div>
+                            
+                            <h4>Todos los privilegios en paquetes UTL</h4>
+                            {% if instance_data.cis_80.all_privileges_final | length > 0 %}
+                            <table>
+                                <tr>
+                                    <th>Paquete</th>
+                                    <th>Privilegio</th>
+                                    <th>Otorgado a</th>
+                                    <th>Propietario</th>
+                                    <th>Otorgante</th>
+                                    <th>Estado</th>
+                                </tr>
+                                {% for priv in instance_data.cis_80.all_privileges_final %}
+                                <tr class="{{ 'fail' if priv.grantee == 'PUBLIC' else 'info' }}">
+                                    <td>{{ priv.table_name }}</td>
+                                    <td>{{ priv.privilege }}</td>
+                                    <td>{{ priv.grantee }}</td>
+                                    <td>{{ priv.owner }}</td>
+                                    <td>{{ priv.grantor }}</td>
+                                    <td>{% if priv.grantee == 'PUBLIC' %}No Conforme{% else %}Conforme{% endif %}</td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                            {% else %}
+                            <div class="info-box">
+                                <p>No se encontraron privilegios sobre los paquetes UTL_HTTP, UTL_TCP o UTL_SMTP después de la verificación.</p>
+                            </div>
+                            {% endif %}
+                            
                             {% if instance_data.cis_80.was_remediated %}
                                 {% if instance_data.cis_80.compliant_final %}
                                 <div class="info-box" style="background-color: rgba(39, 174, 96, 0.1); border-left-color: #27ae60;">
                                     <p><strong>Remediación exitosa:</strong> Se han revocado todos los privilegios PUBLIC sobre los paquetes UTL_HTTP, UTL_TCP y UTL_SMTP.</p>
+                                    <p><strong>Comandos ejecutados:</strong></p>
+                                    <pre>{{ instance_data.cis_80.remediation_commands }}</pre>
                                 </div>
                                 {% else %}
                                 <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
                                     <p><strong>Remediación parcial:</strong> Algunos privilegios PUBLIC no pudieron ser revocados. Se requiere verificación manual.</p>
                                     
                                     {% if instance_data.cis_80.public_privileges_final | length > 0 %}
+                                    <h4>Privilegios PUBLIC restantes</h4>
                                     <table>
                                         <tr>
                                             <th>Paquete</th>
                                             <th>Privilegio</th>
                                             <th>Propietario</th>
                                             <th>Otorgante</th>
-                                            <th>Estado</th>
                                         </tr>
                                         {% for priv in instance_data.cis_80.public_privileges_final %}
                                         <tr class="fail">
@@ -10397,23 +10461,20 @@
                                             <td>{{ priv.privilege }}</td>
                                             <td>{{ priv.owner }}</td>
                                             <td>{{ priv.grantor }}</td>
-                                            <td>No Conforme</td>
                                         </tr>
                                         {% endfor %}
                                     </table>
                                     {% endif %}
                                 </div>
                                 {% endif %}
-                            {% else %}
-                                {% if instance_data.cis_80.compliant_final %}
-                                <div class="info-box" style="background-color: rgba(39, 174, 96, 0.1); border-left-color: #27ae60;">
-                                    <p><strong>Estado correcto:</strong> No se han detectado privilegios PUBLIC sobre los paquetes UTL_HTTP, UTL_TCP o UTL_SMTP.</p>
-                                </div>
-                                {% else %}
+                            {% elif instance_data.cis_80.public_privileges_final | length > 0 %}
                                 <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
                                     <p><strong>Estado no conforme:</strong> Existen privilegios PUBLIC sobre paquetes UTL peligrosos. Se requiere remediación manual.</p>
                                 </div>
-                                {% endif %}
+                            {% else %}
+                                <div class="info-box" style="background-color: rgba(39, 174, 96, 0.1); border-left-color: #27ae60;">
+                                    <p><strong>Estado correcto:</strong> No se han detectado privilegios PUBLIC sobre los paquetes UTL_HTTP, UTL_TCP o UTL_SMTP.</p>
+                                </div>
                             {% endif %}
                         </div>
                     </div>
@@ -13189,15 +13250,19 @@
                                 <br><small>Usuario: {{ instance_user }}</small>
                             </td>
                             <td class="{{ 'pass' if instance_data.cis_80.compliant_initial else 'fail' }}">
-                                {% if instance_data.cis_80.compliant_initial %}
-                                    Conforme (sin privilegios PUBLIC)
+                                {% if instance_data.cis_80.all_privileges_initial | length == 0 %}
+                                    Sin privilegios UTL
+                                {% elif instance_data.cis_80.compliant_initial %}
+                                    Conforme ({{ instance_data.cis_80.all_privileges_initial | length }} privilegios, ninguno PUBLIC)
                                 {% else %}
                                     No Conforme ({{ instance_data.cis_80.public_privileges_initial | length }} privilegios PUBLIC)
                                 {% endif %}
                             </td>
                             <td class="{{ 'pass' if instance_data.cis_80.compliant_final else 'fail' }}">
-                                {% if instance_data.cis_80.compliant_final %}
-                                    Conforme (sin privilegios PUBLIC)
+                                {% if instance_data.cis_80.all_privileges_final | length == 0 %}
+                                    Sin privilegios UTL
+                                {% elif instance_data.cis_80.compliant_final %}
+                                    Conforme ({{ instance_data.cis_80.all_privileges_final | length }} privilegios, ninguno PUBLIC)
                                 {% else %}
                                     No Conforme ({{ instance_data.cis_80.public_privileges_final | length }} privilegios PUBLIC)
                                 {% endif %}
@@ -13206,7 +13271,7 @@
                                 {% if instance_data.cis_80.was_remediated and instance_data.cis_80.compliant_final %}
                                     <span class="change-indicator positive">✓ Remediado</span>
                                 {% elif instance_data.cis_80.was_remediated and not instance_data.cis_80.compliant_final %}
-                                    <span class="change-indicator warning">Remedión parcial</span>
+                                    <span class="change-indicator warning">Remediación parcial</span>
                                 {% elif instance_data.cis_80.compliant_initial and instance_data.cis_80.compliant_final %}
                                     <span class="change-indicator neutral">Ya conforme</span>
                                 {% elif not instance_data.cis_80.compliant_initial and not instance_data.cis_80.compliant_final %}

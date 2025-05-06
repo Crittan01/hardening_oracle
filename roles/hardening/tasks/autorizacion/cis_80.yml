@@ -1,7 +1,7 @@
 ---
 - name: CIS 80 - Verificación de privilegios PUBLIC sobre UTL_HTTP, UTL_TCP y UTL_SMTP
   block:
-    # Paso 1: Ejecutar la consulta de verificación
+    # Paso 1: Ejecutar la consulta de verificación completa
     - name: (Check - CIS 80) - Verificar privilegios sobre UTL_HTTP, UTL_TCP y UTL_SMTP
       ansible.builtin.shell: |
         . ~/.bash_profile
@@ -17,16 +17,18 @@
       register: cis_80_check_result
       changed_when: false
 
-    # Paso 2: Procesar los resultados para identificar privilegios PUBLIC
+    # Paso 2: Procesar los resultados para todos los privilegios y los específicos de PUBLIC
     - name: (Check - CIS 80) - Procesar resultados
       ansible.builtin.set_fact:
-        cis_80_all_privs: "{{ cis_80_check_result.stdout_lines | select('match', '.+,.+,.+,.+,.+') | list }}"
+        cis_80_all_privs_raw: "{{ cis_80_check_result.stdout_lines | select('match', '.+,.+,.+,.+,.+') | list }}"
+        cis_80_all_privs: []
         cis_80_public_privs: []
 
-    # Paso 3: Estructurar los privilegios y filtrar por PUBLIC
-    - name: (Check - CIS 80) - Estructurar privilegios y filtrar por PUBLIC
+    # Paso 3: Estructurar todos los privilegios
+    - name: (Check - CIS 80) - Estructurar todos los privilegios
       ansible.builtin.set_fact:
-        cis_80_public_privs: "{{ cis_80_public_privs + [priv_detail] }}"
+        cis_80_all_privs: "{{ cis_80_all_privs + [priv_detail] }}"
+        cis_80_public_privs: "{{ cis_80_public_privs + [priv_detail] if priv_parts[3] | trim == 'PUBLIC' else cis_80_public_privs }}"
       vars:
         priv_parts: "{{ priv_item.split(',') }}"
         priv_detail:
@@ -37,10 +39,9 @@
             "grantee": "{{ priv_parts[3] | trim }}",
             "table_name": "{{ priv_parts[4] | trim }}",
           }
-      loop: "{{ cis_80_all_privs }}"
+      loop: "{{ cis_80_all_privs_raw }}"
       loop_control:
         loop_var: priv_item
-      when: priv_item.split(',')[3] | trim == 'PUBLIC'
 
     # Paso 4: Determinar conformidad inicial
     - name: (Check - CIS 80) - Determinar conformidad inicial
@@ -78,7 +79,7 @@
           register: cis_80_remediation_result
           changed_when: true
 
-        # Paso 7: Verificar nuevamente después de la remediación
+        # Paso 7: Verificar nuevamente después de la remediación (usando la misma consulta que antes)
         - name: (Remediation - CIS 80) - Verificar privilegios después de remediación
           ansible.builtin.shell: |
             . ~/.bash_profile
@@ -86,8 +87,7 @@
             sqlplus -s / as sysdba << EOF
             {{ hardening_set_sqlplus }}
             select owner || ',' || grantor || ',' || privilege || ',' || grantee || ',' || table_name
-            from dba_tab_privs where table_name in ('UTL_HTTP','UTL_TCP','UTL_SMTP')
-            and grantee = 'PUBLIC';
+            from dba_tab_privs where table_name in ('UTL_HTTP','UTL_TCP','UTL_SMTP');
             EXIT;
             EOF
           become: true
@@ -98,15 +98,39 @@
         # Paso 8: Procesar resultados post-remediación
         - name: (Remediation - CIS 80) - Procesar resultados después de remediación
           ansible.builtin.set_fact:
-            cis_80_remaining_public_privs: "{{ cis_80_verify_after_result.stdout_lines | select('match', '.+,.+,.+,.+,.+') | list }}"
+            cis_80_all_privs_final_raw: "{{ cis_80_verify_after_result.stdout_lines | select('match', '.+,.+,.+,.+,.+') | list }}"
+            cis_80_all_privs_final: []
+            cis_80_public_privs_final: []
+
+        - name: (Remediation - CIS 80) - Estructurar privilegios finales
+          ansible.builtin.set_fact:
+            cis_80_all_privs_final: "{{ cis_80_all_privs_final + [priv_detail] }}"
+            cis_80_public_privs_final: "{{ cis_80_public_privs_final + [priv_detail] if priv_parts[3] | trim == 'PUBLIC' else cis_80_public_privs_final }}"
+          vars:
+            priv_parts: "{{ priv_item.split(',') }}"
+            priv_detail:
+              {
+                "owner": "{{ priv_parts[0] | trim }}",
+                "grantor": "{{ priv_parts[1] | trim }}",
+                "privilege": "{{ priv_parts[2] | trim }}",
+                "grantee": "{{ priv_parts[3] | trim }}",
+                "table_name": "{{ priv_parts[4] | trim }}",
+              }
+          loop: "{{ cis_80_all_privs_final_raw }}"
+          loop_control:
+            loop_var: priv_item
+
+        - name: (Remediation - CIS 80) - Establecer estado final después de remediación
+          ansible.builtin.set_fact:
             cis_80_was_remediated: true
-            cis_80_compliant_final: "{{ cis_80_verify_after_result.stdout_lines | select('match', '.+,.+,.+,.+,.+') | list | length == 0 }}"
+            cis_80_compliant_final: "{{ cis_80_public_privs_final | length == 0 }}"
 
         # Paso 9: Mostrar resultados después de la remediación
         - name: (Remediation - CIS 80) - Mostrar resultados después de remediación
           ansible.builtin.debug:
             msg:
-              - "Privilegios PUBLIC restantes: {{ cis_80_remaining_public_privs | length }}"
+              - "Privilegios totales restantes: {{ cis_80_all_privs_final | length }}"
+              - "Privilegios PUBLIC restantes: {{ cis_80_public_privs_final | length }}"
               - "Remediación aplicada: {{ cis_80_was_remediated }}"
               - "Conformidad final: {{ cis_80_compliant_final }}"
 
@@ -115,7 +139,8 @@
       ansible.builtin.set_fact:
         cis_80_was_remediated: false
         cis_80_compliant_final: "{{ cis_80_compliant_initial }}"
-        cis_80_remaining_public_privs: []
+        cis_80_all_privs_final: "{{ cis_80_all_privs }}"
+        cis_80_public_privs_final: "{{ cis_80_public_privs }}"
       when: not cis_80_needs_remediation | bool
 
     # Paso 11: Agregar los resultados a la lista global
@@ -131,25 +156,30 @@
             implementacion: |
               No tener privilegios "EXECUTE" garantizados del paquete UTL_HTTP, UTL_TCP and UTL_SMTP desde PUBLIC
 
-              <br>revoke execute on sys.UTL_HTTP from public;
-              <br>revoke execute on sys.UTL_TCP from public;
-              <br>revoke execute on sys.UTL_SMTP from public;
+              revoke execute on sys.UTL_HTTP from public;
+              revoke execute on sys.UTL_TCP from public;
+              revoke execute on sys.UTL_SMTP from public;
             verificacion: >-
               Ejecutar el siguiente script:
               select owner, grantor, privilege, grantee, table_name from dba_tab_privs
               where table_name in ('UTL_HTTP','UTL_TCP','UTL_SMTP');
             objetivo: >-
               Prevenir que usuarios no autorizados puedan ejecutar paquetes que permiten:
-              <br>* UTL_HTTP: Realizar solicitudes HTTP
-              <br>* UTL_TCP: Establecer conexiones de red TCP
-              <br>* UTL_SMTP: Enviar correos electrónicos
+              * UTL_HTTP: Realizar solicitudes HTTP
+              * UTL_TCP: Establecer conexiones de red TCP
+              * UTL_SMTP: Enviar correos electrónicos
 
               Estos paquetes, si se conceden indiscriminadamente, pueden representar riesgos significativos
               de seguridad al permitir acceso a recursos de red y comunicaciones externas.
             type: "security"
-            all_privileges: "{{ cis_80_all_privs | length }}"
+            all_privileges_initial: "{{ cis_80_all_privs }}"
             public_privileges_initial: "{{ cis_80_public_privs }}"
-            public_privileges_final: "{{ cis_80_remaining_public_privs | default([]) }}"
+            all_privileges_final: "{{ cis_80_all_privs_final }}"
+            public_privileges_final: "{{ cis_80_public_privs_final }}"
             compliant_initial: "{{ cis_80_compliant_initial }}"
             compliant_final: "{{ cis_80_compliant_final }}"
             was_remediated: "{{ cis_80_was_remediated }}"
+            remediation_commands: |
+              revoke execute on sys.UTL_HTTP from public;
+              revoke execute on sys.UTL_TCP from public;
+              revoke execute on sys.UTL_SMTP from public;
