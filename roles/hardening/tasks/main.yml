@@ -869,3 +869,14 @@
   tags:
     - autorizacion
     - cis_74
+
+- name: Incluir CIS 75 - sqlplus
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_75.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_75
+  tags:
+    - autorizacion
+    - cis_75

@@ -1184,6 +1184,15 @@
                         {% endif %}
                     {% endif %}
 
+                    {% if instance_data.cis_75 is defined %}
+                        {% if instance_data.cis_75.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_75.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
                     {% set initial_percent = (initial_compliant / total_checks * 100) | round | int %}
                     {% set final_percent = (final_compliant / total_checks * 100) | round | int %}
                     
@@ -5911,6 +5920,95 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 75 - Permisos de SQLPlus -->
+                    {% if instance_data.cis_75 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 75</span>
+                                {{ instance_data.cis_75.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_75.compliant_initial else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_75.compliant_initial else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_75.description }}</span>
+                                {{ instance_data.cis_75.implementacion }}
+                            </p>
+                            
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            <h4>Estado del binario SQLPlus</h4>
+                            <table>
+                                <tr>
+                                    <th>Archivo</th>
+                                    <th>Existe</th>
+                                    <th>Propietario</th>
+                                    <th>Grupo</th>
+                                    <th>Permisos</th>
+                                    <th>Problemas</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_75.compliant_initial else 'fail' }}">
+                                    <td>{{ instance_data.cis_75.sqlplus_path }}</td>
+                                    <td>{{ 'Sí' if instance_data.cis_75.file_exists else 'No' }}</td>
+                                    <td>{{ instance_data.cis_75.file_owner }}</td>
+                                    <td>{{ instance_data.cis_75.file_group }}</td>
+                                    <td>{{ instance_data.cis_75.file_mode }}</td>
+                                    <td>
+                                        {% if not instance_data.cis_75.file_exists %}
+                                        <span class="status-indicator status-danger">Archivo no existe</span>
+                                        {% elif instance_data.cis_75.compliant_initial %}
+                                        <span class="status-indicator status-success">Conforme</span>
+                                        {% else %}
+                                        <ul style="margin: 0; padding-left: 20px;">
+                                            {% if not instance_data.cis_75.owner_valid %}
+                                            <li>Propietario no sigue patrón: 'ora' + 3-4 caracteres o 'grid'</li>
+                                            {% endif %}
+                                            {% if not instance_data.cis_75.owner_matches_instance %}
+                                            <li>No pertenece al usuario de instancia: {{ instance_user }}</li>
+                                            {% endif %}
+                                            {% if not instance_data.cis_75.group_valid %}
+                                            <li>Grupo incorrecto: debe ser dba, oinstall o asmdba</li>
+                                            {% endif %}
+                                            {% if not instance_data.cis_75.perms_valid %}
+                                            <li>Permisos excesivos: debe ser 0750 o más restrictivo</li>
+                                            {% endif %}
+                                        </ul>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            {% if not instance_data.cis_75.compliant_initial %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Acción recomendada:</strong></p>
+                                <pre>
+                    # Asignar propietario correcto
+                    chown {{ instance_data.cis_75.instance_user }} {{ instance_data.cis_75.sqlplus_path }}
+
+                    # Asignar grupo correcto
+                    chgrp dba {{ instance_data.cis_75.sqlplus_path }}
+
+                    # Establecer permisos
+                    chmod 0750 {{ instance_data.cis_75.sqlplus_path }}
+
+                    # Adicionalmente, considere remover librerías externas compartidas:
+                    # find $ORACLE_HOME/lib -name "*.so" -exec rm -f {} \;
+                                </pre>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="info-box">
+                                <p><strong>Objetivo:</strong> {{ instance_data.cis_75.objetivo }}</p>
+                                <p><strong>Verificación:</strong> {{ instance_data.cis_75.verificacion }}</p>
+                                <p><strong>Nota:</strong> {{ instance_data.cis_75.nota }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
 
                 <!-- Tab: Estado Después (instancia específica) -->
@@ -9883,6 +9981,50 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 75 - Permisos de SQLPlus -->
+                    {% if instance_data.cis_75 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 75</span>
+                                {{ instance_data.cis_75.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_75.compliant_final else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_75.compliant_final else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            <h4>Estado del binario SQLPlus</h4>
+                            <table>
+                                <tr>
+                                    <th>Archivo</th>
+                                    <th>Existe</th>
+                                    <th>Propietario</th>
+                                    <th>Grupo</th>
+                                    <th>Permisos</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_75.compliant_final else 'fail' }}">
+                                    <td>{{ instance_data.cis_75.sqlplus_path }}</td>
+                                    <td>{{ 'Sí' if instance_data.cis_75.file_exists else 'No' }}</td>
+                                    <td>{{ instance_data.cis_75.file_owner }}</td>
+                                    <td>{{ instance_data.cis_75.file_group }}</td>
+                                    <td>{{ instance_data.cis_75.file_mode }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_75.compliant_final else 'No Conforme' }}</td>
+                                </tr>
+                            </table>
+                            
+                            {% if not instance_data.cis_75.compliant_final %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Atención:</strong> Este control requiere remediación manual para asegurar que el binario SQLPlus tenga los permisos y propietarios adecuados.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 
                 <!-- Tab: Comparación (instancia específica) -->
@@ -12529,6 +12671,48 @@
                                     <span class="change-indicator neutral">Ya conforme</span>
                                 {% elif not instance_data.cis_74.compliant_initial and not instance_data.cis_74.compliant_final %}
                                     <span class="change-indicator neutral">Sin cambio (Remediación manual requerida)</span>
+                                {% else %}
+                                    <span class="change-indicator negative">Degradado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+
+                        <!-- CIS 75 - Permisos de SQLPlus -->
+                        {% if instance_data.cis_75 is defined %}
+                        {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
+
+                        <tr>
+                            <td>
+                                <span class="control-id">CIS 75</span>
+                                {{ instance_data.cis_75.parametro }}
+                                <br><small>Usuario: {{ instance_user }}</small>
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_75.compliant_initial else 'fail' }}">
+                                {% if not instance_data.cis_75.file_exists %}
+                                    No Conforme (archivo no existe)
+                                {% elif instance_data.cis_75.compliant_initial %}
+                                    Conforme
+                                {% else %}
+                                    No Conforme (permisos o propietario incorrectos)
+                                {% endif %}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_75.compliant_final else 'fail' }}">
+                                {% if not instance_data.cis_75.file_exists %}
+                                    No Conforme (archivo no existe)
+                                {% elif instance_data.cis_75.compliant_final %}
+                                    Conforme
+                                {% else %}
+                                    No Conforme (permisos o propietario incorrectos)
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if instance_data.cis_75.was_remediated %}
+                                    <span class="change-indicator positive">✓ Remediado</span>
+                                {% elif instance_data.cis_75.compliant_initial and instance_data.cis_75.compliant_final %}
+                                    <span class="change-indicator neutral">Ya conforme</span>
+                                {% elif not instance_data.cis_75.compliant_initial and not instance_data.cis_75.compliant_final %}
+                                    <span class="change-indicator manual">Requiere revisión manual</span>
                                 {% else %}
                                     <span class="change-indicator negative">Degradado</span>
                                 {% endif %}

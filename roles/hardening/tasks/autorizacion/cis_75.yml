@@ -1,0 +1,117 @@
+---
+- name: CIS 75 - Verificación de permisos del binario SQLPlus
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 75) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_75_sqlplus_path: "{{ hardening_oracle_home }}/bin/sqlplus"
+        cis_75_valid_pattern: "^ora[a-zA-Z0-9]{3,4}$"
+        cis_75_invalid_users: ["oracle"]
+        cis_75_explict_valid_users: ["grid"]
+        cis_75_valid_groups: ["dba", "oinstall", "asmdba"]
+        cis_75_instance_user_valid: "{{
+          hardening_current_user is match('^ora[a-zA-Z0-9]{3,4}$') and
+          hardening_current_user != 'oracle' or
+          hardening_current_user in ['grid'] }}"
+
+    # Verificar existencia y propiedades del binario sqlplus
+    - name: (Check - CIS 75) - Verificar binario sqlplus
+      ansible.builtin.stat:
+        path: "{{ cis_75_sqlplus_path }}"
+        get_attributes: true
+      register: cis_75_sqlplus_stat
+      become: true
+
+    # Evaluar cumplimiento
+    - name: (Check - CIS 75) - Evaluar cumplimiento
+      ansible.builtin.set_fact:
+        cis_75_file_exists: "{{ cis_75_sqlplus_stat.stat.exists | default(false) }}"
+        cis_75_file_owner: "{{ cis_75_sqlplus_stat.stat.pw_name | default('N/A') if cis_75_sqlplus_stat.stat.exists | default(false) else 'N/A' }}"
+        cis_75_file_group: "{{ cis_75_sqlplus_stat.stat.gr_name | default('N/A') if cis_75_sqlplus_stat.stat.exists | default(false) else 'N/A' }}"
+        cis_75_file_mode: "{{ cis_75_sqlplus_stat.stat.mode | default('N/A') if cis_75_sqlplus_stat.stat.exists | default(false) else 'N/A' }}"
+        cis_75_owner_valid: "{{
+          cis_75_sqlplus_stat.stat.exists | default(false) and
+          ((cis_75_sqlplus_stat.stat.pw_name is match(cis_75_valid_pattern) and
+          cis_75_sqlplus_stat.stat.pw_name not in cis_75_invalid_users) or
+          cis_75_sqlplus_stat.stat.pw_name in cis_75_explict_valid_users) }}"
+        cis_75_owner_matches_instance: "{{
+          cis_75_sqlplus_stat.stat.exists | default(false) and
+          cis_75_sqlplus_stat.stat.pw_name == hardening_current_user }}"
+        cis_75_group_valid: "{{
+          cis_75_sqlplus_stat.stat.exists | default(false) and
+          cis_75_sqlplus_stat.stat.gr_name in cis_75_valid_groups }}"
+        cis_75_perms_valid: "{{
+          cis_75_sqlplus_stat.stat.exists | default(false) and
+          (cis_75_sqlplus_stat.stat.mode | regex_replace('^0', '') | int(base=8) <= 0o750) }}"
+
+    # Establecer estado general
+    - name: (Check - CIS 75) - Establecer estado general
+      ansible.builtin.set_fact:
+        cis_75_compliant_initial: "{{
+          cis_75_file_exists and
+          cis_75_owner_valid and
+          cis_75_owner_matches_instance and
+          cis_75_group_valid and
+          cis_75_perms_valid }}"
+        cis_75_compliant_final: "{{
+          cis_75_file_exists and
+          cis_75_owner_valid and
+          cis_75_owner_matches_instance and
+          cis_75_group_valid and
+          cis_75_perms_valid }}"
+        cis_75_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 75) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Instancia: {{ hardening_current_instance }}"
+          - "Binario SQLPlus: {{ cis_75_sqlplus_path }}"
+          - "¿El archivo existe?: {{ cis_75_file_exists }}"
+          - "Propietario: {{ cis_75_file_owner }}"
+          - "Grupo: {{ cis_75_file_group }}"
+          - "Permisos: {{ cis_75_file_mode }}"
+          - "Estado de cumplimiento: {{ cis_75_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_75] }}"
+      vars:
+        instance_result_cis_75:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_75:
+            parametro: "Permisos de SQLPlus"
+            description: "Cliente de bases de datos Oracle que permite la ejecución de comandos SQL."
+            implementacion: |
+              El binario sqlplus debe pertenecer al usuario de la instancia, estar asignado
+              a un grupo válido (dba, oinstall, asmdba) y tener permisos 0750 o más restrictivos.
+              Adicionalmente, se recomienda remover las librerías externas compartidas de $ORACLE_HOME/lib.
+            verificacion: >-
+              Los permisos de los binarios de sqlplus en el servidor deberían estar
+              restringidos al propietario del software Oracle y al grupo dba.
+            objetivo: >-
+              Asegurar que los binarios de SQLPlus tengan permisos de acceso muy restrictivos,
+              limitando su uso y protegiendo las herramientas de administración de base de datos.
+            commando: |
+              ls -la $ORACLE_HOME/bin/sqlplus
+            nota: >-
+              Los permisos 0750 significan rwxr-x--- (propietario: rwx, grupo: r-x, otros: ---).
+              Esto permite que solo el propietario pueda ejecutar todas las acciones, el grupo
+              pueda leer y ejecutar, y otros usuarios no tengan acceso.
+            type: "filesystem"
+            sqlplus_path: "{{ cis_75_sqlplus_path }}"
+            file_exists: "{{ cis_75_file_exists }}"
+            file_owner: "{{ cis_75_file_owner }}"
+            file_group: "{{ cis_75_file_group }}"
+            file_mode: "{{ cis_75_file_mode }}"
+            owner_valid: "{{ cis_75_owner_valid }}"
+            owner_matches_instance: "{{ cis_75_owner_matches_instance }}"
+            group_valid: "{{ cis_75_group_valid }}"
+            perms_valid: "{{ cis_75_perms_valid }}"
+            instance_user: "{{ hardening_current_user }}"
+            instance_user_valid: "{{ cis_75_instance_user_valid }}"
+            compliant_initial: "{{ cis_75_compliant_initial }}"
+            compliant_final: "{{ cis_75_compliant_final }}"
+            was_remediated: false
