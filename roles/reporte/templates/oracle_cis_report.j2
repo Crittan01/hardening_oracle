@@ -1193,6 +1193,15 @@
                         {% endif %}
                     {% endif %}
 
+                    {% if instance_data.cis_76 is defined %}
+                        {% if instance_data.cis_76.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_76.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
                     {% set initial_percent = (initial_compliant / total_checks * 100) | round | int %}
                     {% set final_percent = (final_compliant / total_checks * 100) | round | int %}
                     
@@ -6009,6 +6018,76 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 76 - Acceso a Sinónimos V$ -->
+                    {% if instance_data.cis_76 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 76</span>
+                                {{ instance_data.cis_76.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_76.actual_count|int == 0 else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_76.actual_count|int == 0 else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_76.description }}</span>
+                                {{ instance_data.cis_76.implementacion }}
+                            </p>
+                            
+                            <h4>Estado actual de objetos en tablespace SYSTEM</h4>
+                            <table>
+                                <tr>
+                                    <th>Resultado</th>
+                                    <th>Conteo Actual</th>
+                                    <th>Conteo Esperado</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_76.actual_count|int == 0 else 'fail' }}">
+                                    <td>Objetos a Sinónimos V$</td>
+                                    <td>{{ instance_data.cis_76.actual_count }}</td>
+                                    <td>{{ instance_data.cis_76.expected_count }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_76.actual_count|int == 0 else 'No Conforme' }}</td>
+                                </tr>
+                            </table>
+                            
+                            {% if instance_data.cis_76.noncompliant_objects | length > 0 %}
+                            <h4>Detalle de objetos no conformes</h4>
+                            <table>
+                                <tr>
+                                    <th>Propietario</th>
+                                    <th>Tipo de Segmento</th>
+                                    <th>Nombre de Segmento</th>
+                                    <th>Tablespace</th>
+                                </tr>
+                                {% for object in instance_data.cis_76.noncompliant_objects %}
+                                <tr class="fail">
+                                    <td>{{ object.owner }}</td>
+                                    <td>{{ object.segment_type }}</td>
+                                    <td>{{ object.segment_name }}</td>
+                                    <td>{{ object.tablespace_name }}</td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                            {% endif %}
+                            
+                            <div class="info-box">
+                                <p><strong>Descripción de verificación:</strong> {{ instance_data.cis_76.verificacion }}</p>
+                                <p><strong>Nota:</strong> {{ instance_data.cis_76.nota }}</p>
+                            </div>
+                            
+                            {% if instance_data.cis_76.actual_count|int > 0 %}
+                            <div class="info-box">
+                                <p><strong>Remediación recomendada:</strong></p>
+                                <p>{{ instance_data.cis_76.remediacion }}</p>
+                                <p>Este control requiere remediación manual. Se deben mover los objetos listados a otros tablespaces.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
 
                 <!-- Tab: Estado Después (instancia específica) -->
@@ -10025,6 +10104,51 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 76 - Acceso a Sinónimos V$ -->
+                    {% if instance_data.cis_76 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 76</span>
+                                {{ instance_data.cis_76.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_76.actual_count|int == 0 else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_76.actual_count|int == 0 else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_76.description }}</span>
+                                {{ instance_data.cis_76.implementacion }}
+                            </p>
+                            
+                            <h4>Estado de objetos en tablespace SYSTEM</h4>
+                            <table>
+                                <tr>
+                                    <th>Resultado</th>
+                                    <th>Conteo Antes</th>
+                                    <th>Conteo Después</th>
+                                    <th>Conteo Esperado</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_76.actual_count|int == 0 else 'fail' }}">
+                                    <td>Objetos a Sinónimos V$</td>
+                                    <td>{{ instance_data.cis_76.actual_count }}</td>
+                                    <td>{{ instance_data.cis_76.actual_count }}</td>
+                                    <td>{{ instance_data.cis_76.expected_count }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_76.actual_count|int == 0 else 'No Conforme' }}</td>
+                                </tr>
+                            </table>
+                            
+                            {% if instance_data.cis_76.actual_count|int > 0 %}
+                            <div class="info-box">
+                                <p><strong>Nota:</strong> Este control requiere remediación manual. No se aplicaron cambios automáticos.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 
                 <!-- Tab: Comparación (instancia específica) -->
@@ -12680,8 +12804,6 @@
 
                         <!-- CIS 75 - Permisos de SQLPlus -->
                         {% if instance_data.cis_75 is defined %}
-                        {% set instance_user = reporte_instances_info[instance].user | default('oracle') %}
-
                         <tr>
                             <td>
                                 <span class="control-id">CIS 75</span>
@@ -12715,6 +12837,35 @@
                                     <span class="change-indicator manual">Requiere revisión manual</span>
                                 {% else %}
                                     <span class="change-indicator negative">Degradado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+
+                        <!-- CIS 76 - Acceso a Sinónimos V$ -->
+                        {% if instance_data.cis_76 is defined %}
+                        <tr>
+                            <td>
+                                <span class="control-id">CIS 76</span>
+                                {{ instance_data.cis_76.parametro }}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_76.actual_count|int == 0 else 'fail' }}">
+                                Objetos a Sinónimos V$: {{ instance_data.cis_76.actual_count }}
+                                {% if instance_data.cis_76.noncompliant_objects | length > 0 %}
+                                <br><span class="change-indicator warning">{{ instance_data.cis_76.noncompliant_objects | length }} objeto(s) no conforme(s)</span>
+                                {% endif %}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_76.actual_count|int == 0 else 'fail' }}">
+                                Objetos a Sinónimos V$: {{ instance_data.cis_76.actual_count }}
+                                {% if instance_data.cis_76.actual_count|int > 0 %}
+                                <br><span class="change-indicator warning">Requiere remediación manual</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if instance_data.cis_76.actual_count|int == 0 %}
+                                    <span class="change-indicator neutral">Ya conforme</span>
+                                {% else %}
+                                    <span class="change-indicator warning">Remediación manual requerida</span>
                                 {% endif %}
                             </td>
                         </tr>

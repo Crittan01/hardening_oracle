@@ -1,0 +1,125 @@
+# roles/hardening/tasks/autorizacion/cis_76.yml
+---
+- name: CIS 76 - Verificación de Acceso a Sinónimos V$
+  block:
+    # Paso 1: Ejecutar la consulta de conteo proporcionada en el instructivo
+    - name: (Check - CIS 76) - Verificar usuarios con objetos en Acceso a Sinónimos V$
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select count(*) from (select grantee, privilege, table_name from dba_tab_privs where table_name like ('V$_%') and owner not in
+        ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG','AUDSYS','SYSKM','SYSRAC','OUTLN','GSMADMIN_INTERNAL','GSMUSER','GSMROOTUSER','DIP','XS$NULL',
+        'REMOTE_SCHEDULER_AGENT','DBSFWUSER','ORACLE_OCM','SYS$UMF','DBSNMP','APPQOSSYS','GSMCATUSER','GGSYS','XDB','ANONYMOUS','WMSYS','OJVMSYS','CTXSYS',
+        'ORDSYS','SI_INFORMTN_SCHEMA','MDSYS','ORDPLUGINS','ORDDATA','OLAPSYS','MDDATA','DVSYS','DVF'));
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_76_count_result
+      changed_when: false
+
+    # Paso 2: Ejecutar la consulta detallada para obtener la lista de objetos no conformes
+    - name: (Check - CIS 76) - Obtener detalle de objetos no conformes en Acceso a Sinónimos V$
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        select grantee || ',' || privilege || ',' || table_name from dba_tab_privs where table_name like ('V$_%') and owner not in
+        ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG','AUDSYS','SYSKM','SYSRAC','OUTLN','GSMADMIN_INTERNAL','GSMUSER','GSMROOTUSER','DIP','XS$NULL',
+        'REMOTE_SCHEDULER_AGENT','DBSFWUSER','ORACLE_OCM','SYS$UMF','DBSNMP','APPQOSSYS','GSMCATUSER','GGSYS','XDB','ANONYMOUS','WMSYS','OJVMSYS','CTXSYS',
+        'ORDSYS','SI_INFORMTN_SCHEMA','MDSYS','ORDPLUGINS','ORDDATA','OLAPSYS','MDDATA','DVSYS','DVF');
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_76_detail_result
+      changed_when: false
+
+    # Paso 3: Procesar los resultados
+    - name: (Check - CIS 76) - Procesar resultados
+      ansible.builtin.set_fact:
+        cis_76_count: "{{ cis_76_count_result.stdout | trim | int }}"
+        cis_76_detail_raw: "{{ cis_76_detail_result.stdout_lines | select('match', '.+,.+,.+') | list }}"
+        cis_76_expected_count: 0
+
+    - name: (Check - CIS 76) - Debug detallado
+      ansible.builtin.debug:
+        msg:
+          - "Valor como texto: '{{ cis_76_count_result.stdout }}'"
+          - "Valor después de trim: '{{ cis_76_count_result.stdout | trim }}'"
+          - "Valor como entero: {{ cis_76_count_result.stdout | trim | int }}"
+          - "¿Es igual a 0?: {{ (cis_76_count_result.stdout | trim | int) == 0 }}"
+        verbosity: 0
+
+    # Paso 4: Inicializar variables para evitar errores
+    - name: (Check - CIS 76) - Inicializar variables
+      ansible.builtin.set_fact:
+        cis_76_noncompliant_objects: []
+
+    # Paso 5: Estructurar datos de objetos no conformes
+    - name: (Check - CIS 76) - Estructurar datos de objetos no conformes
+      ansible.builtin.set_fact:
+        cis_76_noncompliant_objects:
+          "{{ cis_76_noncompliant_objects | default([]) +
+          [{'grantee': object_item.split(',')[0] | trim,
+          'privilege': object_item.split(',')[1] | trim,
+          'table_name': object_item.split(',')[2] | trim}] }}"
+      loop: "{{ cis_76_detail_raw }}"
+      loop_control:
+        loop_var: object_item
+      when: cis_76_detail_raw | length > 0
+
+    # Paso 6: Determinar estado de conformidad
+    - name: (Check - CIS 76) - Determinar estado de conformidad
+      ansible.builtin.set_fact:
+        cis_76_compliant_initial: "{{ cis_76_count | int == 0 }}"
+
+    # Paso 7: Mostrar resultados para depuración
+    - name: (Check - CIS 76) - Mostrar resultado de verificación
+      ansible.builtin.debug:
+        msg:
+          - "Número de objetos no conformes: {{ cis_76_count }}"
+          - "Objetos encontrados: {{ cis_76_noncompliant_objects | length }}"
+          - "Estado de conformidad: {{ cis_76_compliant_initial }}"
+        verbosity: 0
+
+    # Paso 8: No hay remediación automática para este control, solo indicar si se requiere
+    - name: (Check - CIS 76) - Determinar si se requiere remediación manual
+      ansible.builtin.set_fact:
+        cis_76_needs_remediation: "{{ not cis_76_compliant_initial }}"
+        cis_76_compliant_final: "{{ cis_76_compliant_initial }}" # Sin remediación automática, el estado final = inicial
+        cis_76_was_remediated: false
+
+    # Paso 9: Agregar los resultados a la lista global
+    - name: Agregar resultados de CIS 76 a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_76] }}"
+      vars:
+        instance_result_cis_76:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_76:
+            parametro: "Acceso a Sinónimos V$"
+            description: "Asegurar que el privilegio SELECT no se ha otorgado a ningún sinónimo V$"
+            implementacion: |
+              No asignar privilegios a v$Synonyms para ningun usuario
+            verificacion: >-
+              Para consultar los roles definidos y los privilegios otorgados a través de ellos, utilice las vistas:
+              <br>select count(*) from (select grantee, privilege, table_name from dba_tab_privs where table_name like ('V$_%') and owner not in
+              ('SYS' ,'SYSTEM' ,'SYSBACKUP' ,'SYSDG','AUDSYS','SYSKM','SYSRAC','OUTLN','GSMADMIN_INTERNAL','GSMUSER','GSMROOTUSER','DIP','XS$NULL',
+              'REMOTE_SCHEDULER_AGENT','DBSFWUSER','ORACLE_OCM','SYS$UMF','DBSNMP','APPQOSSYS','GSMCATUSER','GGSYS','XDB','ANONYMOUS','WMSYS','OJVMSYS','CTXSYS',
+              'ORDSYS','SI_INFORMTN_SCHEMA','MDSYS','ORDPLUGINS','ORDDATA','OLAPSYS','MDDATA','DVSYS','DVF'));
+            remediacion: |
+              Acceso a Sinónimos V$ Asegura que el privilegio SELECT no se ha otorgado a ningún sinónimo V$
+            nota: >-
+              Este control requiere remediación manual. deben ser movidos fuera del Acceso a Sinónimos V$.
+            type: "security"
+            expected_count: "{{ cis_76_expected_count }}"
+            actual_count: "{{ cis_76_count }}"
+            noncompliant_objects: "{{ cis_76_noncompliant_objects }}"
+            compliant_initial: "{{ cis_76_compliant_initial }}"
+            compliant_final: "{{ cis_76_compliant_final }}"
+            needs_remediation: "{{ cis_76_needs_remediation }}"
+            was_remediated: "{{ cis_76_was_remediated }}"

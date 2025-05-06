@@ -880,3 +880,14 @@
   tags:
     - autorizacion
     - cis_75
+
+- name: Incluir CIS 76 - Acceso a Sinónimos V$
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_76.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_76
+  tags:
+    - autorizacion
+    - cis_76
