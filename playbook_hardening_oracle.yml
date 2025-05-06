@@ -6,6 +6,8 @@
     oracle_owner: oracle
     oracle_group: oinstall
     instances_results: [] # Variable para almacenar los resultados de todas las instancias
+    # Lista de instancias a excluir (vacía por defecto)
+    excluded_instances: []
 
   pre_tasks:
     - name: (PRE) - Recolectar Facts

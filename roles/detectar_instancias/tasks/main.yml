@@ -1,4 +1,3 @@
-# roles/detectar_instancias/tasks/main.yml
 ---
 # Detectar instancias Oracle con su usuario y ruta correspondiente
 - name: Detectar instancias Oracle, usuarios y rutas
@@ -17,16 +16,18 @@
 # Inicializar variables
 - name: Inicializar estructuras de datos para instancias
   ansible.builtin.set_fact:
+    oracle_instances_raw: []
     oracle_instances: []
+    oracle_instances_info_raw: {}
     oracle_instances_info: {}
   tags: always
 
-# Procesar resultados para obtener instancias y datos asociados
-- name: Procesar datos de instancias Oracle
+# Procesar resultados para obtener la lista completa de instancias
+- name: Procesar datos de instancias Oracle (lista completa)
   ansible.builtin.set_fact:
-    oracle_instances: "{{ oracle_instances + [instance_sid] }}"
-    oracle_instances_info: >-
-      {{ oracle_instances_info | combine({
+    oracle_instances_raw: "{{ oracle_instances_raw + [instance_sid] }}"
+    oracle_instances_info_raw: >-
+      {{ oracle_instances_info_raw | default({}) | combine({
           instance_sid: {
             'sid': instance_sid,
             'user': instance_user,
@@ -43,6 +44,27 @@
   when: item | trim != ""
   tags: always
 
+# Filtrar instancias excluidas
+- name: Filtrar instancias excluidas
+  ansible.builtin.set_fact:
+    oracle_instances: "{{ oracle_instances_raw | difference(excluded_instances | default([])) }}"
+  tags: always
+
+# Mostrar instancias excluidas
+- name: Mostrar instancias excluidas
+  ansible.builtin.debug:
+    msg: "Se excluyeron las siguientes instancias: {{ excluded_instances | default([]) | intersect(oracle_instances_raw) }}"
+  when: excluded_instances | default([]) | length > 0 and excluded_instances | default([]) | intersect(oracle_instances_raw) | length > 0
+  tags: always
+
+# Generar información final solo para instancias incluidas
+- name: Crear estructura de información para instancias incluidas
+  ansible.builtin.set_fact:
+    oracle_instances_info: "{{ oracle_instances_info | combine({item: oracle_instances_info_raw[item]}) }}"
+  loop: "{{ oracle_instances }}"
+  when: oracle_instances | length > 0
+  tags: always
+
 # Verificar si hay instancias detectadas
 - name: Verificar si hay instancias Oracle en ejecución
   ansible.builtin.set_fact:
@@ -54,5 +76,8 @@
   ansible.builtin.debug:
     msg:
       - "Instancias Oracle detectadas: {{ oracle_instances if oracle_instances_found else 'Ninguna' }}"
+      - "Instancias excluidas: {{ excluded_instances | default([]) | intersect(oracle_instances_raw) }}"
       - "Información detallada: {{ oracle_instances_info | to_nice_yaml }}"
+      - "Instancias totales antes de exclusión: {{ oracle_instances_raw | length }}"
+      - "Instancias procesadas después de exclusión: {{ oracle_instances | length }}"
   tags: always
