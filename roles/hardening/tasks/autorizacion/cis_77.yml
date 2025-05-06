@@ -1,0 +1,88 @@
+---
+- name: CIS 77 - Verificación de UTL_FILE_DIR
+  block:
+    # Definiciones básicas
+    - name: (Check - CIS 77) - Definiciones y variables
+      ansible.builtin.set_fact:
+        cis_77_parametro: "utl_file_dir"
+        cis_77_comando: "show parameter utl_file_dir;"
+        cis_77_es_19c: "{{
+          'Database 19c' in oracle_version_full | default('Oracle Database') or
+          '19.' in oracle_version_full | default('Oracle Database') }}"
+
+    # Verificar valor del parámetro
+    - name: (Check - CIS 77) - Verificar parámetro UTL_FILE_DIR
+      ansible.builtin.shell: |
+        . ~/.bash_profile
+        export ORACLE_SID={{ hardening_current_instance }}
+        sqlplus -s / as sysdba << EOF
+        {{ hardening_set_sqlplus }}
+        show parameter utl_file_dir;
+        EXIT;
+        EOF
+      become: true
+      become_user: "{{ hardening_current_user }}"
+      register: cis_77_query_result
+      changed_when: false
+
+    # Procesar resultado
+    - name: (Check - CIS 77) - Procesar resultado de la consulta
+      ansible.builtin.set_fact:
+        cis_77_raw_output: "{{ cis_77_query_result.stdout_lines }}"
+        cis_77_tiene_valor: "{{
+          cis_77_query_result.stdout is not search('No rows selected') and
+          cis_77_query_result.stdout is not search('utl_file_dir[ ]+string[ ]+$') and
+          cis_77_query_result.stdout | trim != '' }}"
+        cis_77_valor: "{{  'NULL' if
+          cis_77_query_result.stdout is search('No rows selected') or
+          cis_77_query_result.stdout is search('utl_file_dir[ ]+string[ ]+$') or
+          cis_77_query_result.stdout | trim == ''
+          else cis_77_query_result.stdout | trim | regex_search('utl_file_dir[^\\n]+(.+)$', '\\1') | trim }}"
+
+    # Establecer estado de cumplimiento
+    - name: (Check - CIS 77) - Establecer estado de cumplimiento
+      ansible.builtin.set_fact:
+        cis_77_compliant_initial: "{{ not cis_77_tiene_valor or cis_77_es_19c }}"
+        cis_77_compliant_final: "{{ not cis_77_tiene_valor or cis_77_es_19c }}"
+        cis_77_was_remediated: false
+
+    # Mostrar resultados para depuración
+    - name: (Check - CIS 77) - Mostrar resultados
+      ansible.builtin.debug:
+        msg:
+          - "Instancia: {{ hardening_current_instance }}"
+          - "¿Es Oracle 19c?: {{ cis_77_es_19c }}"
+          - "¿UTL_FILE_DIR tiene valor?: {{ cis_77_tiene_valor }}"
+          - "Valor: {{ cis_77_valor }}"
+          - "Estado de cumplimiento: {{ cis_77_compliant_initial }}"
+        verbosity: 1
+
+    # Agregar resultados a la lista global
+    - name: Agregar resultados a la lista global
+      ansible.builtin.set_fact:
+        instances_results: "{{ instances_results | default([]) + [instance_result_cis_77] }}"
+      vars:
+        instance_result_cis_77:
+          instance_name: "{{ hardening_current_instance }}"
+          cis_77:
+            parametro: "UTL_FILE_DIR"
+            description:
+              "Asegura que el parámetro de inicialización del directorio de archivos de utilidades (UTL_FILE_DIR) no esté definido en
+              una de las ubicaciones de archivo de rastreo de volcado de memoria"
+            implementacion: |
+              El parámetro UTL_FILE_DIR no debe estar configurado, especialmente en Oracle 19c donde está obsoleto.
+            verificacion: >-
+              Ejecutar la consulta "show parameter utl_file_dir;" y verificar que el resultado sea NULL.
+            objetivo: >-
+              Restringir el acceso a directorios sensibles mediante el paquete UTL_FILE, previniendo
+              posibles riesgos de seguridad al limitar los directorios accesibles para operaciones de archivo.
+            commando: "show parameter utl_file_dir;"
+            informacion: "El parámetro UTL_FILE_DIR no está soportado en Oracle 19c y debe utilizarse en su lugar un directorio de Oracle."
+            type: "database"
+            es_19c: "{{ cis_77_es_19c }}"
+            raw_output: "{{ cis_77_raw_output }}"
+            tiene_valor: "{{ cis_77_tiene_valor }}"
+            valor: "{{ cis_77_valor }}"
+            compliant_initial: "{{ cis_77_compliant_initial }}"
+            compliant_final: "{{ cis_77_compliant_final }}"
+            was_remediated: false

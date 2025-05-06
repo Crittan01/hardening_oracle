@@ -1,5 +1,25 @@
 # roles/hardening/tasks/main.yml
 ---
+- name: Obtener la version de Oracle
+  ansible.builtin.shell: |
+    . ~/.bash_profile
+    export ORACLE_SID={{ hardening_current_instance }}
+    sqlplus -s / as sysdba << EOF
+    {{ hardening_set_sqlplus }}
+    SELECT banner FROM v\$version WHERE banner LIKE 'Oracle Database%';
+    EXIT;
+    EOF
+  become: true
+  become_user: oracle
+  register: oracle_version_result
+  changed_when: false
+  tags: always
+
+- name: Extraer versiones
+  ansible.builtin.set_fact:
+    oracle_version_full: "{{ oracle_version_result.stdout_lines[0] | default('Oracle Database') }}"
+  tags: always
+
 - name: Mostrar instancia actual a procesar
   ansible.builtin.debug:
     msg: "Procesando hardening para instancia: {{ hardening_current_instance | upper }} (Usuario: {{ hardening_current_user }})"
@@ -891,3 +911,14 @@
   tags:
     - autorizacion
     - cis_76
+
+- name: Incluir CIS 77 - Verificación de UTL_FILE_DIR
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_77.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_77
+  tags:
+    - autorizacion
+    - cis_77

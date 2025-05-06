@@ -1202,6 +1202,15 @@
                         {% endif %}
                     {% endif %}
 
+                    {% if instance_data.cis_77 is defined %}
+                        {% if instance_data.cis_77.compliant_initial | default(false) %}
+                            {% set initial_compliant = initial_compliant + 1 %}
+                        {% endif %}
+                        {% if instance_data.cis_77.compliant_final | default(false) %}
+                            {% set final_compliant = final_compliant + 1 %}
+                        {% endif %}
+                    {% endif %}
+
                     {% set initial_percent = (initial_compliant / total_checks * 100) | round | int %}
                     {% set final_percent = (final_compliant / total_checks * 100) | round | int %}
                     
@@ -6088,6 +6097,86 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 77 - UTL_FILE_DIR -->
+                    {% if instance_data.cis_77 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 77</span>
+                                {{ instance_data.cis_77.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_77.compliant_initial else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_77.compliant_initial else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p class="control-description">
+                                <span class="requirement">Requerimiento: {{ instance_data.cis_77.description }}</span>
+                                {{ instance_data.cis_77.implementacion }}
+                            </p>
+                            
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            {% if instance_data.cis_77.es_19c %}
+                            <div class="info-box" style="background-color: rgba(52, 152, 219, 0.1); border-left-color: #3498db;">
+                                <p><strong>Información:</strong> Esta instancia es Oracle 19c donde el parámetro UTL_FILE_DIR está obsoleto y debe utilizarse en su lugar un directorio de Oracle.</p>
+                            </div>
+                            {% endif %}
+                            
+                            <h4>Estado del parámetro</h4>
+                            <table>
+                                <tr>
+                                    <th>Parámetro</th>
+                                    <th>Valor Actual</th>
+                                    <th>Valor Esperado</th>
+                                    <th>Problemas</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_77.compliant_initial else 'fail' }}">
+                                    <td>utl_file_dir</td>
+                                    <td>{{ instance_data.cis_77.valor }}</td>
+                                    <td>NULL</td>
+                                    <td>
+                                        {% if instance_data.cis_77.compliant_initial %}
+                                        <span class="status-indicator status-success">Conforme</span>
+                                        {% elif instance_data.cis_77.es_19c %}
+                                        <ul style="margin: 0; padding-left: 20px;">
+                                            <li>Parámetro UTL_FILE_DIR obsoleto en 19c pero está configurado</li>
+                                        </ul>
+                                        {% else %}
+                                        <ul style="margin: 0; padding-left: 20px;">
+                                            <li>El parámetro no debería tener valor configurado</li>
+                                        </ul>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            {% if not instance_data.cis_77.compliant_initial and not instance_data.cis_77.es_19c %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Acción recomendada:</strong></p>
+                                <pre>
+                    # Eliminar el parámetro UTL_FILE_DIR del archivo de parámetros
+                    ALTER SYSTEM RESET utl_file_dir SCOPE=SPFILE SID='*';
+
+                    # Se requiere reiniciar la instancia para que los cambios surtan efecto
+                                </pre>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="info-box">
+                                <p><strong>Objetivo:</strong> {{ instance_data.cis_77.objetivo }}</p>
+                                <p><strong>Verificación:</strong> {{ instance_data.cis_77.verificacion }}</p>
+                                <p><strong>Información:</strong> {{ instance_data.cis_77.informacion }}</p>
+                            </div>
+                            
+                            <div class="info-box" style="background-color: rgba(52, 152, 219, 0.05); border-left-color: #3498db;">
+                                <p><strong>Salida de la consulta:</strong></p>
+                                <pre style="margin: 0; white-space: pre-wrap;">{{ instance_data.cis_77.raw_output | join('\n') }}</pre>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
 
                 <!-- Tab: Estado Después (instancia específica) -->
@@ -10149,6 +10238,44 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- CIS 77 - UTL_FILE_DIR -->
+                    {% if instance_data.cis_77 is defined %}
+                    <div class="control-box">
+                        <div class="control-header">
+                            <h3 class="control-title">
+                                <span class="control-id">CIS 77</span>
+                                {{ instance_data.cis_77.parametro }}
+                            </h3>
+                            <span class="{{ 'status-indicator status-success' if instance_data.cis_77.compliant_final else 'status-indicator status-danger' }}">
+                                {{ 'Conforme' if instance_data.cis_77.compliant_final else 'No Conforme' }}
+                            </span>
+                        </div>
+                        <div class="control-body">
+                            <p><strong>Instancia:</strong> {{ instance }} - Usuario: {{ instance_user }}</p>
+                            
+                            <h4>Estado del parámetro</h4>
+                            <table>
+                                <tr>
+                                    <th>Parámetro</th>
+                                    <th>Valor</th>
+                                    <th>Estado</th>
+                                </tr>
+                                <tr class="{{ 'pass' if instance_data.cis_77.compliant_final else 'fail' }}">
+                                    <td>utl_file_dir</td>
+                                    <td>{{ instance_data.cis_77.valor }}</td>
+                                    <td>{{ 'Conforme' if instance_data.cis_77.compliant_final else 'No Conforme' }}</td>
+                                </tr>
+                            </table>
+                            
+                            {% if not instance_data.cis_77.compliant_final and not instance_data.cis_77.es_19c %}
+                            <div class="info-box" style="background-color: rgba(231, 76, 60, 0.1); border-left-color: #e74c3c;">
+                                <p><strong>Atención:</strong> Este control requiere remediación manual. El parámetro UTL_FILE_DIR debe ser eliminado.</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 
                 <!-- Tab: Comparación (instancia específica) -->
@@ -12866,6 +12993,46 @@
                                     <span class="change-indicator neutral">Ya conforme</span>
                                 {% else %}
                                     <span class="change-indicator warning">Remediación manual requerida</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+
+                        <!-- CIS 77 - UTL_FILE_DIR -->
+                        {% if instance_data.cis_77 is defined %}
+                        <tr>
+                            <td>
+                                <span class="control-id">CIS 77</span>
+                                {{ instance_data.cis_77.parametro }}
+                                <br><small>Usuario: {{ instance_user }}</small>
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_77.compliant_initial else 'fail' }}">
+                                {% if instance_data.cis_77.es_19c %}
+                                    Conforme (19c - parámetro obsoleto)
+                                {% elif instance_data.cis_77.compliant_initial %}
+                                    Conforme (valor NULL)
+                                {% else %}
+                                    No Conforme (valor: {{ instance_data.cis_77.valor }})
+                                {% endif %}
+                            </td>
+                            <td class="{{ 'pass' if instance_data.cis_77.compliant_final else 'fail' }}">
+                                {% if instance_data.cis_77.es_19c %}
+                                    Conforme (19c - parámetro obsoleto)
+                                {% elif instance_data.cis_77.compliant_final %}
+                                    Conforme (valor NULL)
+                                {% else %}
+                                    No Conforme (valor: {{ instance_data.cis_77.valor }})
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if instance_data.cis_77.was_remediated %}
+                                    <span class="change-indicator positive">✓ Remediado</span>
+                                {% elif instance_data.cis_77.compliant_initial and instance_data.cis_77.compliant_final %}
+                                    <span class="change-indicator neutral">Ya conforme</span>
+                                {% elif not instance_data.cis_77.compliant_initial and not instance_data.cis_77.compliant_final %}
+                                    <span class="change-indicator manual">Requiere revisión manual</span>
+                                {% else %}
+                                    <span class="change-indicator negative">Degradado</span>
                                 {% endif %}
                             </td>
                         </tr>
