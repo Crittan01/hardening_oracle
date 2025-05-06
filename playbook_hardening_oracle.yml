@@ -122,6 +122,9 @@
           cis_75,
           cis_76,
           cis_77,
+#          cis_78,
+#          cis_79,
+          cis_80,
         ]
 
     # Generar el reporte (condicional)

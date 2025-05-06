@@ -922,3 +922,14 @@
   tags:
     - autorizacion
     - cis_77
+
+- name: Incluir CIS 80 - Verificación de UTL_FILE_DIR
+  ansible.builtin.include_tasks:
+    file: autorizacion/cis_80.yml
+    apply:
+      tags:
+        - autorizacion
+        - cis_80
+  tags:
+    - autorizacion
+    - cis_80
