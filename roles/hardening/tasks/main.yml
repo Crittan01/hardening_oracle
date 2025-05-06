@@ -747,16 +747,16 @@
     - autorizacion
     - cis_59
 
-- name: Incluir CIS 60 - Permisos en archivos en ORACLE_HOME (sin incluir ORACLE_HOME/bin)
-  ansible.builtin.include_tasks:
-    file: autorizacion/cis_60.yml
-    apply:
-      tags:
-        - autorizacion
-        - cis_60
-  tags:
-    - autorizacion
-    - cis_60
+# - name: Incluir CIS 60 - Permisos en archivos en ORACLE_HOME (sin incluir ORACLE_HOME/bin)
+#   ansible.builtin.include_tasks:
+#     file: autorizacion/cis_60.yml
+#     apply:
+#       tags:
+#         - autorizacion
+#         - cis_60
+#   tags:
+#     - autorizacion
+#     - cis_60
 
 - name: Incluir CIS 61 - Archivo .profile de Oracle en UNIX
   ansible.builtin.include_tasks:
